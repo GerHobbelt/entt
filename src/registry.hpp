@@ -187,7 +187,7 @@ class Registry {
     // variable templates are fine as well, but for the fact that MSVC goes crazy
     template<typename Comp>
     struct identifier {
-        static constexpr auto value = ident<Component...>.template get<Comp>();
+        static constexpr auto value = ident_wrapper<Component...>().ident.template get<Comp>();
     };
 
 public:
@@ -342,8 +342,8 @@ public:
         assert(valid(entity));
 
         return (entities[entity].test(identifier<Comp>::value)
-                ? this->template replace<Comp>(entity, std::forward<Args>(args)...)
-                : this->template assign<Comp>(entity, std::forward<Args>(args)...));
+                ? this->template replace<Comp>(entity, static_cast<Args&&>(args)...)
+                : this->template assign<Comp>(entity, static_cast<Args&&>(args)...));
     }
 
     entity_type clone(entity_type from) {
