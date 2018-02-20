@@ -102,7 +102,7 @@ public:
     using iterator_type = Iterator;
 
     /*! @brief Default constructor. */
-    SparseSet() noexcept = default;
+    SparseSet() = default;
 
     /*! @brief Default destructor. */
     virtual ~SparseSet() noexcept = default;
@@ -403,7 +403,7 @@ public:
     using iterator_type = typename underlying_type::iterator_type;
 
     /*! @brief Default constructor. */
-    SparseSet() noexcept = default;
+    SparseSet() = default;
 
     /*! @brief Copying a sparse set isn't allowed. */
     SparseSet(const SparseSet &) = delete;
