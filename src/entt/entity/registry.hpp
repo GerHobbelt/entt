@@ -1604,6 +1604,14 @@ public:
         return { (*this = {}), assure };
     }
 
+    /**
+    * @brief Returns a reference to the pool for a given component.
+    */
+    template<typename Component>
+    inline SparseSet<Entity, Component> & component_pool() ENTT_NOEXCEPT {
+      return pool<Component>();
+    }
+
 private:
     std::vector<std::unique_ptr<SparseSet<Entity>>> handlers;
     std::vector<std::tuple<std::unique_ptr<SparseSet<Entity>>, signal_type, signal_type>> pools;
