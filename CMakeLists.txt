@@ -16,7 +16,7 @@ endif()
 # Project configuration
 #
 
-project(EnTT VERSION 2.7.2)
+project(EnTT VERSION 2.7.3)
 
 include(GNUInstallDirs)
 
@@ -218,6 +218,4 @@ add_custom_target(
         README.md
         TODO
         .travis.yml
-        docs/CONTRIBUTING.md
-        docs/extra.dox
 )
