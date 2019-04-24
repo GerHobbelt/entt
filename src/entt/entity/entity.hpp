@@ -19,9 +19,7 @@ namespace internal {
 
 
 template<typename Entity>
-struct NullTrait {
-    static constexpr auto value = ~typename entt_traits<Entity>::entity_type{};
-};
+static constexpr auto null = ~typename entt_traits<Entity>::entity_type{};
 
 
 struct Null {
@@ -29,7 +27,7 @@ struct Null {
 
     template<typename Entity>
     constexpr operator Entity() const ENTT_NOEXCEPT {
-        return NullTrait<Entity>::value;
+        return null<Entity>;
     }
 
     constexpr bool operator==(Null) const ENTT_NOEXCEPT {
@@ -42,12 +40,12 @@ struct Null {
 
     template<typename Entity>
     constexpr bool operator==(const Entity entity) const ENTT_NOEXCEPT {
-        return entity == NullTrait<Entity>::value;
+        return entity == null<Entity>;
     }
 
     template<typename Entity>
     constexpr bool operator!=(const Entity entity) const ENTT_NOEXCEPT {
-        return entity != NullTrait<Entity>::value;
+        return entity != null<Entity>;
     }
 };
 
