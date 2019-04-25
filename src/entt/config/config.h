@@ -1,7 +1,6 @@
 #ifndef ENTT_CONFIG_CONFIG_H
 #define ENTT_CONFIG_CONFIG_H
 
-#define ENTT_NOEXCEPT
 
 #ifndef ENTT_NOEXCEPT
 #define ENTT_NOEXCEPT noexcept

@@ -31,7 +31,7 @@ struct Monostate {
      */
     template<typename Type>
     void operator=(Type val) const ENTT_NOEXCEPT {
-        Monostate::Atomic<Type>::value = val;
+        Monostate::value<Type> = val;
     }
 
     /**
@@ -41,20 +41,18 @@ struct Monostate {
      */
     template<typename Type>
     operator Type() const ENTT_NOEXCEPT {
-        return Monostate::Atomic<Type>::value;
+        return Monostate::value<Type>;
     }
 
 private:
     template<typename Type>
-    struct Atomic {
-        static std::atomic<Type> value;
-    };
+    static std::atomic<Type> value;
 };
 
 
 template<HashedString::hash_type ID>
 template<typename Type>
-std::atomic<Type> Monostate<ID>::Atomic<Type>::value{};
+std::atomic<Type> Monostate<ID>::value{};
 
 
 }
