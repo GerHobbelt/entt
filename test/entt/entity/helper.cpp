@@ -1,75 +1,40 @@
 #include <gtest/gtest.h>
 #include <entt/core/hashed_string.hpp>
 #include <entt/entity/helper.hpp>
+#include <entt/entity/entity.hpp>
 #include <entt/entity/registry.hpp>
+#include <entt/core/type_traits.hpp>
 
-TEST(Helper, Dependency) {
-    entt::DefaultRegistry registry;
-    const auto entity = registry.create();
-    entt::connect<double, float>(registry.construction<int>());
+struct clazz {
+    void func(entt::registry &, entt::entity curr) { entt = curr; }
+    entt::entity entt{entt::null};
+};
 
-    ASSERT_FALSE(registry.has<double>(entity));
-    ASSERT_FALSE(registry.has<float>(entity));
+TEST(Helper, AsView) {
+    entt::registry registry;
+    const entt::registry cregistry;
 
-    registry.assign<char>(entity);
-
-    ASSERT_FALSE(registry.has<double>(entity));
-    ASSERT_FALSE(registry.has<float>(entity));
-
-    registry.assign<int>(entity);
-
-    ASSERT_TRUE(registry.has<double>(entity));
-    ASSERT_TRUE(registry.has<float>(entity));
-    ASSERT_EQ(registry.get<double>(entity), .0);
-    ASSERT_EQ(registry.get<float>(entity), .0f);
-
-    registry.get<double>(entity) = .3;
-    registry.get<float>(entity) = .1f;
-    registry.remove<int>(entity);
-    registry.assign<int>(entity);
-
-    ASSERT_EQ(registry.get<double>(entity), .3);
-    ASSERT_EQ(registry.get<float>(entity), .1f);
-
-    registry.remove<int>(entity);
-    registry.remove<float>(entity);
-    registry.assign<int>(entity);
-
-    ASSERT_TRUE(registry.has<float>(entity));
-    ASSERT_EQ(registry.get<double>(entity), .3);
-    ASSERT_EQ(registry.get<float>(entity), .0f);
-
-    registry.remove<int>(entity);
-    registry.remove<double>(entity);
-    registry.remove<float>(entity);
-    entt::disconnect<double, float>(registry.construction<int>());
-    registry.assign<int>(entity);
-
-    ASSERT_FALSE(registry.has<double>(entity));
-    ASSERT_FALSE(registry.has<float>(entity));
+    ([](entt::view<entt::exclude_t<>, int>) {})(entt::as_view{registry});
+    ([](entt::view<entt::exclude_t<int>, char, double>) {})(entt::as_view{registry});
+    ([](entt::view<entt::exclude_t<int>, const char, double>) {})(entt::as_view{registry});
+    ([](entt::view<entt::exclude_t<int>, const char, const double>) {})(entt::as_view{registry});
 }
 
-TEST(Helper, Label) {
-    entt::DefaultRegistry registry;
+TEST(Helper, AsGroup) {
+    entt::registry registry;
+    const entt::registry cregistry;
+
+    ([](entt::group<entt::exclude_t<int>, entt::get_t<char>, double>) {})(entt::as_group{registry});
+    ([](entt::group<entt::exclude_t<int>, entt::get_t<const char>, double>) {})(entt::as_group{registry});
+    ([](entt::group<entt::exclude_t<int>, entt::get_t<const char>, const double>) {})(entt::as_group{registry});
+}
+
+TEST(Invoke, MemberFunction) {
+    entt::registry registry;
     const auto entity = registry.create();
-    registry.assign<entt::label<"foobar"_hs>>(entity);
-    registry.assign<int>(entity, 42);
-    int counter{};
 
-    ASSERT_FALSE(registry.has<entt::label<"barfoo"_hs>>(entity));
-    ASSERT_TRUE(registry.has<entt::label<"foobar"_hs>>(entity));
+    registry.on_construct<clazz>().connect<entt::invoke<&clazz::func>>();
+    registry.assign<clazz>(entity);
 
-    for(auto entity: registry.view<int, entt::label<"foobar"_hs>>()) {
-        (void)entity;
-        ++counter;
-    }
-
-    ASSERT_NE(counter, 0);
-
-    for(auto entity: registry.view<entt::label<"foobar"_hs>>()) {
-        (void)entity;
-        --counter;
-    }
-
-    ASSERT_EQ(counter, 0);
+    ASSERT_EQ(entity, registry.get<clazz>(entity).entt);
 }
