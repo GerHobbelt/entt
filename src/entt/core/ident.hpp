@@ -2,42 +2,15 @@
 #define ENTT_CORE_IDENT_HPP
 
 
-#include <type_traits>
+#include <tuple>
 #include <cstddef>
 #include <utility>
-#include <tuple>
+#include <type_traits>
 #include "../config/config.h"
+#include "fwd.hpp"
 
 
 namespace entt {
-
-
-/**
- * @cond TURN_OFF_DOXYGEN
- * Internal details not to be documented.
- */
-
-
-namespace internal {
-
-
-template<typename...>
-struct IsPartOf;
-
-template<typename Type, typename Current, typename... Other>
-struct IsPartOf<Type, Current, Other...>: std::conditional_t<std::is_same<Type, Current>::value, std::true_type, IsPartOf<Type, Other...>> {};
-
-template<typename Type>
-struct IsPartOf<Type>: std::false_type {};
-
-
-}
-
-
-/**
- * Internal details not to be documented.
- * @endcond TURN_OFF_DOXYGEN
- */
 
 
 /**
@@ -51,13 +24,13 @@ struct IsPartOf<Type>: std::false_type {};
  * Identifiers are constant expression and can be used in any context where such
  * an expression is required. As an example:
  * @code{.cpp}
- * using ID = entt::Identifier<AType, AnotherType>;
+ * using id = entt::identifier<a_type, another_type>;
  *
- * switch(aTypeIdentifier) {
- * case ID::get<AType>():
+ * switch(a_type_identifier) {
+ * case id::type<a_type>:
  *     // ...
  *     break;
- * case ID::get<AnotherType>():
+ * case id::type<another_type>:
  *     // ...
  *     break;
  * default:
@@ -68,37 +41,26 @@ struct IsPartOf<Type>: std::false_type {};
  * @tparam Types List of types for which to generate identifiers.
  */
 template<typename... Types>
-class Identifier final {
+class identifier {
     using tuple_type = std::tuple<std::decay_t<Types>...>;
 
     template<typename Type, std::size_t... Indexes>
-    static constexpr std::size_t get(std::index_sequence<Indexes...>) ENTT_NOEXCEPT {
-        static_assert(internal::IsPartOf<Type, Types...>::value, "!");
-
-        std::size_t max{};
-        using accumulator_type = std::size_t[];
-        accumulator_type accumulator = { (max = std::is_same<Type, std::tuple_element_t<Indexes, tuple_type>>::value ? Indexes : max)... };
-        (void)accumulator;
-        return max;
+    static constexpr id_type get(std::index_sequence<Indexes...>) {
+        static_assert(std::disjunction_v<std::is_same<Type, Types>...>);
+        return (0 + ... + (std::is_same_v<Type, std::tuple_element_t<Indexes, tuple_type>> ? id_type(Indexes) : id_type{}));
     }
 
 public:
     /*! @brief Unsigned integer type. */
-    using identifier_type = std::size_t;
+    using identifier_type = id_type;
 
-    /**
-     * @brief Returns the identifier associated with a given type.
-     * @tparam Type of which to return the identifier.
-     * @return The identifier associated with the given type.
-     */
+    /*! @brief Statically generated unique identifier for the given type. */
     template<typename Type>
-    static constexpr identifier_type get() ENTT_NOEXCEPT {
-        return get<std::decay_t<Type>>(std::make_index_sequence<sizeof...(Types)>{});
-    }
+    static constexpr identifier_type type = get<std::decay_t<Type>>(std::index_sequence_for<Types...>{});
 };
 
 
 }
 
 
-#endif // ENTT_CORE_IDENT_HPP
+#endif

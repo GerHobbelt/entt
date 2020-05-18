@@ -2,10 +2,10 @@
 #define ENTT_PROCESS_PROCESS_HPP
 
 
-#include <type_traits>
-#include <functional>
 #include <utility>
+#include <type_traits>
 #include "../config/config.h"
+#include "../core/type_traits.hpp"
 
 
 namespace entt {
@@ -31,12 +31,13 @@ namespace entt {
  *   update.
  *
  * * @code{.cpp}
- *   void init(void *);
+ *   void init();
  *   @endcode
  *
- *   It's invoked at the first tick, immediately before an update. The `void *`
- *   parameter is an opaque pointer to user data (if any) forwarded directly to
- *   the process during an update.
+ *   It's invoked when the process joins the running queue of a scheduler. This
+ *   happens as soon as it's attached to the scheduler if the process is a top
+ *   level one, otherwise when it replaces its parent if the process is a
+ *   continuation.
  *
  * * @code{.cpp}
  *   void succeeded();
@@ -64,14 +65,14 @@ namespace entt {
  * `succeed` and `fail` protected member functions and even pause or unpause the
  * process itself.
  *
- * @sa Scheduler
+ * @sa scheduler
  *
  * @tparam Derived Actual type of process that extends the class template.
  * @tparam Delta Type to use to provide elapsed time.
  */
 template<typename Derived, typename Delta>
-class Process {
-    enum class State: unsigned int {
+class process {
+    enum class state: unsigned int {
         UNINITIALIZED = 0,
         RUNNING,
         PAUSED,
@@ -81,41 +82,37 @@ class Process {
         FINISHED
     };
 
-    template<State state>
-    using tag = std::integral_constant<State, state>;
-
     template<typename Target = Derived>
-    auto tick(int, tag<State::UNINITIALIZED>, void *data)
-    -> decltype(std::declval<Target>().init(data)) {
-        static_cast<Target *>(this)->init(data);
+    auto next(integral_constant<state::UNINITIALIZED>)
+    -> decltype(std::declval<Target>().init()) {
+        static_cast<Target *>(this)->init();
     }
 
     template<typename Target = Derived>
-    auto tick(int, tag<State::RUNNING>, Delta delta, void *data)
+    auto next(integral_constant<state::RUNNING>, Delta delta, void *data)
     -> decltype(std::declval<Target>().update(delta, data)) {
         static_cast<Target *>(this)->update(delta, data);
     }
 
     template<typename Target = Derived>
-    auto tick(int, tag<State::SUCCEEDED>)
+    auto next(integral_constant<state::SUCCEEDED>)
     -> decltype(std::declval<Target>().succeeded()) {
         static_cast<Target *>(this)->succeeded();
     }
 
     template<typename Target = Derived>
-    auto tick(int, tag<State::FAILED>)
+    auto next(integral_constant<state::FAILED>)
     -> decltype(std::declval<Target>().failed()) {
         static_cast<Target *>(this)->failed();
     }
 
     template<typename Target = Derived>
-    auto tick(int, tag<State::ABORTED>)
+    auto next(integral_constant<state::ABORTED>)
     -> decltype(std::declval<Target>().aborted()) {
         static_cast<Target *>(this)->aborted();
     }
 
-    template<State S, typename... Args>
-    void tick(char, tag<S>, Args &&...) const ENTT_NOEXCEPT {}
+    void next(...) const ENTT_NOEXCEPT {}
 
 protected:
     /**
@@ -126,7 +123,7 @@ protected:
      */
     void succeed() ENTT_NOEXCEPT {
         if(alive()) {
-            current = State::SUCCEEDED;
+            current = state::SUCCEEDED;
         }
     }
 
@@ -138,7 +135,7 @@ protected:
      */
     void fail() ENTT_NOEXCEPT {
         if(alive()) {
-            current = State::FAILED;
+            current = state::FAILED;
         }
     }
 
@@ -149,8 +146,8 @@ protected:
      * running.
      */
     void pause() ENTT_NOEXCEPT {
-        if(current == State::RUNNING) {
-            current = State::PAUSED;
+        if(current == state::RUNNING) {
+            current = state::PAUSED;
         }
     }
 
@@ -161,8 +158,8 @@ protected:
      * paused.
      */
     void unpause() ENTT_NOEXCEPT {
-        if(current  == State::PAUSED) {
-            current  = State::RUNNING;
+        if(current  == state::PAUSED) {
+            current  = state::RUNNING;
         }
     }
 
@@ -171,8 +168,8 @@ public:
     using delta_type = Delta;
 
     /*! @brief Default destructor. */
-    virtual ~Process() ENTT_NOEXCEPT {
-        static_assert(std::is_base_of<Process, Derived>::value, "!");
+    virtual ~process() {
+        static_assert(std::is_base_of_v<process, Derived>);
     }
 
     /**
@@ -183,12 +180,12 @@ public:
      *
      * @param immediately Requests an immediate operation.
      */
-    void abort(const bool immediately = false) ENTT_NOEXCEPT {
+    void abort(const bool immediately = false) {
         if(alive()) {
-            current = State::ABORTED;
+            current = state::ABORTED;
 
             if(immediately) {
-                tick(0);
+                tick({});
             }
         }
     }
@@ -198,7 +195,7 @@ public:
      * @return True if the process is still alive, false otherwise.
      */
     bool alive() const ENTT_NOEXCEPT {
-        return current == State::RUNNING || current == State::PAUSED;
+        return current == state::RUNNING || current == state::PAUSED;
     }
 
     /**
@@ -206,7 +203,7 @@ public:
      * @return True if the process is terminated, false otherwise.
      */
     bool dead() const ENTT_NOEXCEPT {
-        return current == State::FINISHED;
+        return current == state::FINISHED;
     }
 
     /**
@@ -214,7 +211,7 @@ public:
      * @return True if the process is paused, false otherwise.
      */
     bool paused() const ENTT_NOEXCEPT {
-        return current == State::PAUSED;
+        return current == state::PAUSED;
     }
 
     /**
@@ -232,12 +229,13 @@ public:
      */
     void tick(const Delta delta, void *data = nullptr) {
         switch (current) {
-        case State::UNINITIALIZED:
-            tick(0, tag<State::UNINITIALIZED>{}, data);
-            current = State::RUNNING;
-            // no break on purpose, tasks are executed immediately
-        case State::RUNNING:
-            tick(0, tag<State::RUNNING>{}, delta, data);
+        case state::UNINITIALIZED:
+            next(integral_constant<state::UNINITIALIZED>{});
+            current = state::RUNNING;
+            break;
+        case state::RUNNING:
+            next(integral_constant<state::RUNNING>{}, delta, data);
+            break;
         default:
             // suppress warnings
             break;
@@ -245,18 +243,18 @@ public:
 
         // if it's dead, it must be notified and removed immediately
         switch(current) {
-        case State::SUCCEEDED:
-            tick(0, tag<State::SUCCEEDED>{});
-            current = State::FINISHED;
+        case state::SUCCEEDED:
+            next(integral_constant<state::SUCCEEDED>{});
+            current = state::FINISHED;
             break;
-        case State::FAILED:
-            tick(0, tag<State::FAILED>{});
-            current = State::FINISHED;
+        case state::FAILED:
+            next(integral_constant<state::FAILED>{});
+            current = state::FINISHED;
             stopped = true;
             break;
-        case State::ABORTED:
-            tick(0, tag<State::ABORTED>{});
-            current = State::FINISHED;
+        case state::ABORTED:
+            next(integral_constant<state::ABORTED>{});
+            current = state::FINISHED;
             stopped = true;
             break;
         default:
@@ -266,7 +264,7 @@ public:
     }
 
 private:
-    State current{State::UNINITIALIZED};
+    state current{state::UNINITIALIZED};
     bool stopped{false};
 };
 
@@ -304,21 +302,21 @@ private:
  * create them internally each and avery time a lambda or a functor is used as
  * a process.
  *
- * @sa Process
- * @sa Scheduler
+ * @sa process
+ * @sa scheduler
  *
  * @tparam Func Actual type of process.
  * @tparam Delta Type to use to provide elapsed time.
  */
 template<typename Func, typename Delta>
-struct ProcessAdaptor: Process<ProcessAdaptor<Func, Delta>, Delta>, private Func {
+struct process_adaptor: process<process_adaptor<Func, Delta>, Delta>, private Func {
     /**
      * @brief Constructs a process adaptor from a lambda or a functor.
      * @tparam Args Types of arguments to use to initialize the actual process.
      * @param args Parameters to use to initialize the actual process.
      */
     template<typename... Args>
-    ProcessAdaptor(Args &&... args)
+    process_adaptor(Args &&... args)
         : Func{std::forward<Args>(args)...}
     {}
 
@@ -336,4 +334,4 @@ struct ProcessAdaptor: Process<ProcessAdaptor<Func, Delta>, Delta>, private Func
 }
 
 
-#endif // ENTT_PROCESS_PROCESS_HPP
+#endif
