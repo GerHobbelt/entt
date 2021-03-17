@@ -16,6 +16,7 @@ add_custom_target(
     VERBATIM
     SOURCES
         dox/extra.dox
+        md/config.md
         md/core.md
         md/entity.md
         md/faq.md
@@ -27,6 +28,7 @@ add_custom_target(
         md/references.md
         md/resource.md
         md/signal.md
+        md/unreal.md
         doxy.in
 )
 
