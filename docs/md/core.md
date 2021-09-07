@@ -14,6 +14,8 @@
   * [Conflicts](#conflicts)
 * [Monostate](#monostate)
 * [Any as in any type](#any-as-in-any-type)
+  * [Small buffer optimization](#small-buffer-optimization)
+  * [Alignment requirement](#alignment-requirement)
 * [Type support](#type-support)
   * [Type info](#type-info)
     * [Almost unique identifiers](#almost-unique-identifiers)
@@ -24,6 +26,7 @@
     * [Member class type](#member-class-type)
     * [Integral constant](#integral-constant)
     * [Tag](#tag)
+    * [Type list and value list](#type-list-and-value-list)
 * [Utilities](#utilities)
 <!--
 @endcond TURN_OFF_DOXYGEN
@@ -244,8 +247,16 @@ entt::any any{0};
 entt::any in_place{std::in_place_type<int>, 42};
 ```
 
-The `any` class takes the burden of destroying the contained element when
-required, regardless of the storage strategy used for the specific object.<br/>
+Alternatively, the `make_any` function serves the same purpose but requires to
+always be explicit about the type:
+
+```cpp
+entt::any any = entt::make_any<int>(42);
+```
+
+In both cases, the `any` class takes the burden of destroying the contained
+element when required, regardless of the storage strategy used for the specific
+object.<br/>
 Furthermore, an instance of `any` is not tied to an actual type. Therefore, the
 wrapper will be reconfigured by assigning it an object of a different type than
 the one contained, so as to be able to handle the new instance.<br/>
@@ -269,26 +280,23 @@ an opaque container for const and non-const references:
 ```cpp
 int value = 42;
 
-// reference construction
-entt::any any{std::ref(value)};
-entt::any cany{std::cref(value)};
+entt::any any{std::in_place_type<int &>(value)};
+entt::any cany = entt::make_any<const int &>(value);
+entt::any fwd = entt::forward_as_any(value);
 
-// alias construction
-int value = 42;
-entt::any in_place{std::in_place_type<int &>, &value};
+any.emplace<const int &>(value);
 ```
 
-In other words, whenever `any` intercepts a `reference_wrapper` or is explicitly
-told that users want to construct an alias, it acts as a pointer to the original
-instance rather than making a copy of it or moving it internally. The contained
-object is never destroyed and users must ensure that its lifetime exceeds that
-of the container.<br/>
+In other words, whenever `any` is explicitly told to construct an _alias_, it
+acts as a pointer to the original instance rather than making a copy of it or
+moving it internally. The contained object is never destroyed and users must
+ensure that its lifetime exceeds that of the container.<br/>
 Similarly, it's possible to create non-owning copies of `any` from an existing
 object:
 
 ```cpp
 // aliasing constructor
-entt::any ref = as_ref(other);
+entt::any ref = other.as_ref();
 ```
 
 In this case, it doesn't matter if the original container actually holds an
@@ -310,6 +318,48 @@ functions in all respects similar to their most famous counterparts.<br/>
 The only difference is that, in the case of `EnTT`, these won't raise exceptions
 but will only trigger an assert in debug mode, otherwise resulting in undefined
 behavior in case of misuse in release mode.
+
+## Small buffer optimization
+
+The `any` class uses a technique called _small buffer optimization_ to reduce
+the number of allocations where possible.<br/>
+The default reserved size for an instance of `any` is `sizeof(double[2])`.
+However, this is also configurable if needed. In fact, `any` is defined as an
+alias for `basic_any<Len>`, where `Len` is the size above.<br/>
+Users can easily set a custom size or define their own aliases:
+
+```cpp
+using my_any = entt::basic_any<sizeof(double[4])>;
+```
+
+This feature, in addition to allowing the choice of a size that best suits the
+needs of an application, also offers the possibility of forcing dynamic creation
+of objects during construction.<br/>
+In other terms, if the size is 0, `any` avoids the use of any optimization and
+always dynamically allocates objects (except for aliasing cases).
+
+Note that the size of the internal storage as well as the alignment requirements
+are directly part of the type and therefore contribute to define different types
+that won't be able to interoperate with each other.
+
+## Alignment requirement
+
+The alignment requirement is optional and by default the most stringent (the
+largest) for any object whose size is at most equal to the one provided.<br/>
+The `basic_any` class template inspects the alignment requirements in each case,
+even when not provided and may decide not to use the small buffer optimization
+in order to meet them.
+
+The alignment requirement is provided as an optional second parameter following
+the desired size for the internal storage:
+
+```cpp
+using my_any = entt::basic_any<sizeof(double[4]), alignof(double[4])>;
+```
+
+Note that the alignment requirements as well as the size of the internal storage
+are directly part of the type and therefore contribute to define different types
+that won't be able to interoperate with each other.
 
 # Type support
 
@@ -570,6 +620,29 @@ registry.emplace<entt::tag<"enemy"_hs>>(entity);
 
 However, this isn't the only permitted use. Literally any value convertible to
 `id_type` is a good candidate, such as the named constants of an unscoped enum.
+
+### Type list and value list
+
+There is no respectable library where the much desired _type list_ can be
+missing.<br/>
+`EnTT` is no exception and provides (making extensive use of it internally) the
+`type_list` type, in addition to its `value_list` counterpart dedicated to
+non-type template parameters.
+
+Here is a (possibly incomplete) list of the functionalities that come with a
+type list:
+
+* `type_list_element[_t]` to get the N-th element of a type list.
+* `type_list_cast[_t]` and a handy `operator+` to concatenate type lists.
+* `type_list_unique[_t]` to remove duplicate types from a type list.
+* `type_list_contains[_v]` to know if a type list contains a given type.
+* `type_list_diff[_t]` to remove types from type lists.
+
+I'm also pretty sure that more and more utilities will be added over time as
+needs become apparent.<br/>
+Many of these functionalities also exist in their version dedicated to value
+lists. We therefore have `value_list_element[_v]` as well as
+`value_list_cat[_t]`and so on.
 
 # Utilities
 

@@ -37,6 +37,8 @@ struct Defined: entt::type_list<
 };
 
 struct impl {
+    impl() = default;
+    impl(int v): value{v} {}
     void incr() { ++value; }
     void set(int v) { value = v; }
     int get() const { return value; }
@@ -45,12 +47,14 @@ struct impl {
     int value{};
 };
 
+struct alignas(64u) over_aligned: impl {};
+
 TEST(PolyDefined, Functionalities) {
     impl instance{};
 
     entt::poly<Defined> empty{};
     entt::poly<Defined> in_place{std::in_place_type<impl>, 3};
-    entt::poly<Defined> alias{std::ref(instance)};
+    entt::poly<Defined> alias{std::in_place_type<impl &>, instance};
     entt::poly<Defined> value{impl{}};
 
     ASSERT_FALSE(empty);
@@ -79,7 +83,7 @@ TEST(PolyDefined, Functionalities) {
     ASSERT_TRUE(empty);
     ASSERT_EQ(empty->get(), 3);
 
-    entt::poly<Defined> ref = as_ref(in_place);
+    entt::poly<Defined> ref = in_place.as_ref();
 
     ASSERT_TRUE(ref);
     ASSERT_NE(ref.data(), nullptr);
@@ -103,6 +107,11 @@ TEST(PolyDefined, Functionalities) {
     ASSERT_TRUE(move);
     ASSERT_FALSE(copy);
     ASSERT_EQ(move->get(), 3);
+
+    move.reset();
+
+    ASSERT_FALSE(move);
+    ASSERT_EQ(move.type(), entt::type_info{});
 }
 
 TEST(PolyDefined, Owned) {
@@ -131,7 +140,7 @@ TEST(PolyDefined, Owned) {
 
 TEST(PolyDefined, Reference) {
     impl instance{};
-    entt::poly<Defined> poly{std::ref(instance)};
+    entt::poly<Defined> poly{std::in_place_type<impl &>, instance};
 
     ASSERT_TRUE(poly);
     ASSERT_NE(poly.data(), nullptr);
@@ -155,7 +164,7 @@ TEST(PolyDefined, Reference) {
 
 TEST(PolyDefined, ConstReference) {
     impl instance{};
-    entt::poly<Defined> poly{std::cref(instance)};
+    entt::poly<Defined> poly{std::in_place_type<const impl &>, instance};
 
     ASSERT_TRUE(poly);
     ASSERT_EQ(poly.data(), nullptr);
@@ -163,14 +172,14 @@ TEST(PolyDefined, ConstReference) {
     ASSERT_EQ(instance.value, 0);
     ASSERT_EQ(poly->get(), 0);
 
-    ASSERT_DEATH(poly->set(1), ".*");
-    ASSERT_DEATH(poly->incr(), ".*");
+    ASSERT_DEATH(poly->set(1), "");
+    ASSERT_DEATH(poly->incr(), "");
 
     ASSERT_EQ(instance.value, 0);
     ASSERT_EQ(poly->get(), 0);
     ASSERT_EQ(poly->mul(3), 0);
 
-    ASSERT_DEATH(poly->decr(), ".*");
+    ASSERT_DEATH(poly->decr(), "");
 
     ASSERT_EQ(instance.value, 0);
     ASSERT_EQ(poly->get(), 0);
@@ -179,8 +188,8 @@ TEST(PolyDefined, ConstReference) {
 
 TEST(PolyDefined, AsRef) {
     entt::poly<Defined> poly{impl{}};
-    auto ref = as_ref(poly);
-    auto cref = as_ref(std::as_const(poly));
+    auto ref = poly.as_ref();
+    auto cref = std::as_const(poly).as_ref();
 
     ASSERT_NE(poly.data(), nullptr);
     ASSERT_NE(ref.data(), nullptr);
@@ -193,8 +202,8 @@ TEST(PolyDefined, AsRef) {
     ASSERT_NE(std::as_const(ref).data(), nullptr);
     ASSERT_NE(cref.data(), nullptr);
 
-    ref = as_ref(ref);
-    cref = as_ref(std::as_const(cref));
+    ref = ref.as_ref();
+    cref = std::as_const(cref).as_ref();
 
     ASSERT_EQ(ref.data(), nullptr);
     ASSERT_NE(std::as_const(ref).data(), nullptr);
@@ -206,4 +215,47 @@ TEST(PolyDefined, AsRef) {
 
     ASSERT_NE(ref.data(), nullptr);
     ASSERT_NE(cref.data(), nullptr);
+}
+
+TEST(PolyDefined, SBOVsZeroedSBOSize) {
+    entt::poly<Defined> sbo{impl{}};
+    const auto broken = sbo.data();
+    entt::poly<Defined> other = std::move(sbo);
+
+    ASSERT_NE(broken, other.data());
+
+    entt::basic_poly<Defined, 0u> dyn{impl{}};
+    const auto valid = dyn.data();
+    entt::basic_poly<Defined, 0u> same = std::move(dyn);
+
+    ASSERT_EQ(valid, same.data());
+
+    // everything works as expected
+    same->incr();
+
+    ASSERT_EQ(same->get(), 1);
+}
+
+TEST(PolyDefined, Alignment) {
+    static constexpr auto alignment = alignof(over_aligned);
+
+    auto test = [](auto *target, auto cb) {
+        const auto *data = target[0].data();
+
+        ASSERT_TRUE((reinterpret_cast<std::uintptr_t>(target[0u].data()) % alignment) == 0u);
+        ASSERT_TRUE((reinterpret_cast<std::uintptr_t>(target[1u].data()) % alignment) == 0u);
+
+        std::swap(target[0], target[1]);
+
+        ASSERT_TRUE((reinterpret_cast<std::uintptr_t>(target[0u].data()) % alignment) == 0u);
+        ASSERT_TRUE((reinterpret_cast<std::uintptr_t>(target[1u].data()) % alignment) == 0u);
+
+        cb(data, target[1].data());
+    };
+
+    entt::basic_poly<Defined, alignment> nosbo[2] = { over_aligned{}, over_aligned{} };
+    test(nosbo, [](auto *pre, auto *post) { ASSERT_EQ(pre, post); });
+
+    entt::basic_poly<Defined, alignment, alignment> sbo[2] = { over_aligned{}, over_aligned{} };
+    test(sbo, [](auto *pre, auto *post) { ASSERT_NE(pre, post); });
 }

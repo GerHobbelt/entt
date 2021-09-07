@@ -43,8 +43,8 @@ I hope this list can grow much more in the future:
   * [The Machine](https://github.com/Kerndog73/The-Machine): a box pushing
     puzzler with logic gates and other cool stuff.
     [Check it out](https://indi-kernick.itch.io/the-machine-web-version).
-  * [EnttPong 2.0](https://github.com/DomRe/EnttPong): a basic game made to
-    showcase different parts of EnTT and C++17.
+  * [EnTTPong](https://github.com/DomRe/EnttPong): a basic game made to showcase
+    different parts of EnTT and C++17.
   * [Randballs](https://github.com/gale93/randballs): simple `SFML` and `EnTT`
     playground.
   * [EnTT Tower Defense](https://github.com/Daivuk/tddod): a data oriented tower
@@ -64,6 +64,14 @@ I hope this list can grow much more in the future:
   * [DungeonSlayer](https://github.com/alohaeee/DungeonSlayer): 2D game made
     from scratch in C++.
   * [3DGame](https://github.com/kwarkGorny/3DGame): 2.5D top-down space shooter.
+  * [Pulcher](https://github.com/AODQ/pulcher): 2D cross-platform game inspired
+    by Quake.
+  * [Destroid](https://github.com/tyrannicaltoucan/destroid): _one-bazillionth_
+    arcade game about shooting dirty rocks in space, inspired by Asteroids.
+  * [Wanderer](https://github.com/albin-johansson/wanderer): a 2D exploration
+    based indie game.
+  * [Spelunky® Classic remake](https://github.com/dbeef/spelunky-psp): A truly
+    multiplatform experience with a rewrite from scratch.
 
 * Engines and the like:
   * [Aether Engine](https://hadean.com/spatial-simulation/)
@@ -88,8 +96,6 @@ I hope this list can grow much more in the future:
     [Wisp](https://teamwisp.github.io/product/) by
     [Team Wisp](https://teamwisp.github.io/): an advanced real-time ray tracing
     renderer built for the demands of video game artists.
-  * [Apparently](https://github.com/JosiahWI/qub3d-libdeps)
-    [Qub3d](https://qub3d.org/): because blocks should be open source.
   * [shiva](https://github.com/Milerius/shiva): modern C++ engine with
     modularity.
   * [ImGui/EnTT editor](https://github.com/Green-Sky/imgui_entt_entity_editor):
@@ -104,6 +110,12 @@ I hope this list can grow much more in the future:
     Box Generator.
   * [Lina Engine](https://github.com/inanevin/LinaEngine): an open-source,
     modular, tiny and fast C++ game engine, aimed to develop 3D desktop games.
+  * [Spike](https://github.com/FahimFuad/Spike): a powerful game engine which
+    can run on a toaster.
+  * [Helena Framework](https://github.com/NIKEA-SOFT/HelenaFramework): a modern
+    framework in C++17 for backend development.
+  * [Unity/EnTT](https://github.com/TongTungGiang/unity-entt): tech demo of a
+    native simulation layer using `EnTT` and `Unity` as a rendering engine.
 
 * Articles, videos and blog posts:
   * [Some posts](https://skypjack.github.io/tags/#entt) on my personal
@@ -147,8 +159,10 @@ I hope this list can grow much more in the future:
   * [Creating Minecraft in One Week with C++ and Vulkan](https://vazgriz.com/189/creating-minecraft-in-one-week-with-c-and-vulkan/):
     a crack at recreating Minecraft in one week using a custom C++ engine and
     Vulkan ([code included](https://github.com/vazgriz/VoxelGame)).
-  * [Ability Creator](https://www.erichildebrand.net/blog/ability-creator-project-retrospect).
+  * [Ability Creator](https://www.erichildebrand.net/blog/ability-creator-project-retrospect):
     project retrospect by [Eric Hildebrand](https://www.erichildebrand.net/).
+  * [EnTT Entity Component System Gaming Library](https://gamefromscratch.com/entt-entity-component-system-gaming-library/):
+    `EnTT` on GameFromScratch.com.
 
 * Any Other Business:
   * [ArcGIS Runtime SDKs](https://developers.arcgis.com/arcgis-runtime/) by
