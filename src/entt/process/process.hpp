@@ -78,7 +78,8 @@ class process {
         SUCCEEDED,
         FAILED,
         ABORTED,
-        FINISHED
+        FINISHED,
+        REJECTED
     };
 
     template<typename Target = Derived>
@@ -201,7 +202,7 @@ public:
      * @brief Returns true if a process is already terminated.
      * @return True if the process is terminated, false otherwise.
      */
-    [[nodiscard]] bool dead() const ENTT_NOEXCEPT {
+    [[nodiscard]] bool finished() const ENTT_NOEXCEPT {
         return current == state::FINISHED;
     }
 
@@ -218,7 +219,7 @@ public:
      * @return True if the process terminated with errors, false otherwise.
      */
     [[nodiscard]] bool rejected() const ENTT_NOEXCEPT {
-        return stopped;
+        return current == state::REJECTED;
     }
 
     /**
@@ -248,13 +249,11 @@ public:
             break;
         case state::FAILED:
             next(std::integral_constant<state, state::FAILED>{});
-            current = state::FINISHED;
-            stopped = true;
+            current = state::REJECTED;
             break;
         case state::ABORTED:
             next(std::integral_constant<state, state::ABORTED>{});
-            current = state::FINISHED;
-            stopped = true;
+            current = state::REJECTED;
             break;
         default:
             // suppress warnings
@@ -264,7 +263,6 @@ public:
 
 private:
     state current{state::UNINITIALIZED};
-    bool stopped{false};
 };
 
 

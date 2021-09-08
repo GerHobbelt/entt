@@ -3,6 +3,7 @@
 
 
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include "../config/config.h"
 #include "fwd.hpp"
@@ -25,16 +26,93 @@ namespace entt {
  */
 template<typename Resource>
 class resource_handle {
-    /*! @brief Resource handles are friends of their caches. */
-    friend struct resource_cache<Resource>;
-
-    resource_handle(std::shared_ptr<Resource> res) ENTT_NOEXCEPT
-        : resource{std::move(res)}
-    {}
+    /*! @brief Resource handles are friends with each other. */
+    template<typename>
+    friend class resource_handle;
 
 public:
     /*! @brief Default constructor. */
     resource_handle() ENTT_NOEXCEPT = default;
+
+    /**
+     * @brief Creates a handle from a shared pointer, namely a resource.
+     * @param res A pointer to a properly initialized resource.
+     */
+    resource_handle(std::shared_ptr<Resource> res) ENTT_NOEXCEPT
+        : resource{std::move(res)}
+    {}
+
+    /**
+     * @brief Copy constructor.
+     * @param other The instance to copy from.
+     */
+    resource_handle(const resource_handle<Resource> &other) ENTT_NOEXCEPT = default;
+
+    /**
+     * @brief Move constructor.
+     * @param other The instance to move from.
+     */
+    resource_handle(resource_handle<Resource> &&other) ENTT_NOEXCEPT = default;
+
+    /**
+     * @brief Copy constructs a handle which shares ownership of the resource.
+     * @tparam Other Type of resource managed by the received handle.
+     * @param other The handle to copy from.
+     */
+    template<typename Other, typename = std::enable_if_t<!std::is_same_v<Other, Resource> && std::is_base_of_v<Resource, Other>>>
+    resource_handle(const resource_handle<Other> &other) ENTT_NOEXCEPT
+        : resource{other.resource}
+    {}
+
+    /**
+     * @brief Move constructs a handle which takes ownership of the resource.
+     * @tparam Other Type of resource managed by the received handle.
+     * @param other The handle to move from.
+     */
+    template<typename Other, typename = std::enable_if_t<!std::is_same_v<Other, Resource> && std::is_base_of_v<Resource, Other>>>
+    resource_handle(resource_handle<Other> &&other) ENTT_NOEXCEPT
+        : resource{std::move(other.resource)}
+    {}
+
+    /**
+     * @brief Copy assignment operator.
+     * @param other The instance to copy from.
+     * @return This resource handle.
+     */
+    resource_handle & operator=(const resource_handle<Resource> &other) ENTT_NOEXCEPT = default;
+
+    /**
+     * @brief Move assignment operator.
+     * @param other The instance to move from.
+     * @return This resource handle.
+     */
+    resource_handle & operator=(resource_handle<Resource> &&other) ENTT_NOEXCEPT = default;
+
+    /**
+     * @brief Copy assignment operator from foreign handle.
+     * @tparam Other Type of resource managed by the received handle.
+     * @param other The handle to copy from.
+     * @return This resource handle.
+     */
+    template<typename Other>
+    std::enable_if_t<!std::is_same_v<Other, Resource> && std::is_base_of_v<Resource, Other>, resource_handle &>
+    operator=(const resource_handle<Other> &other) ENTT_NOEXCEPT {
+        resource = other.resource;
+        return *this;
+    }
+
+    /**
+     * @brief Move assignment operator from foreign handle.
+     * @tparam Other Type of resource managed by the received handle.
+     * @param other The handle to move from.
+     * @return This resource handle.
+     */
+    template<typename Other>
+    std::enable_if_t<!std::is_same_v<Other, Resource> && std::is_base_of_v<Resource, Other>, resource_handle &>
+    operator=(resource_handle<Other> &&other) ENTT_NOEXCEPT {
+        resource = std::move(other.resource);
+        return *this;
+    }
 
     /**
      * @brief Gets a reference to the managed resource.
@@ -45,7 +123,7 @@ public:
      * @return A reference to the managed resource.
      */
     [[nodiscard]] const Resource & get() const ENTT_NOEXCEPT {
-        ENTT_ASSERT(static_cast<bool>(resource));
+        ENTT_ASSERT(static_cast<bool>(resource), "Invalid resource");
         return *resource;
     }
 
@@ -84,7 +162,6 @@ public:
      * contains no resource at all.
      */
     [[nodiscard]] const Resource * operator->() const ENTT_NOEXCEPT {
-        ENTT_ASSERT(static_cast<bool>(resource));
         return resource.get();
     }
 

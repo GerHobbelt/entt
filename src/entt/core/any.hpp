@@ -2,11 +2,14 @@
 #define ENTT_CORE_ANY_HPP
 
 
+#include <cstddef>
 #include <functional>
-#include <new>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include "../config/config.h"
+#include "../core/utility.hpp"
+#include "fwd.hpp"
 #include "type_info.hpp"
 #include "type_traits.hpp"
 
@@ -14,15 +17,34 @@
 namespace entt {
 
 
-/*! @brief A SBO friendly, type-safe container for single values of any type. */
-class any {
-    enum class operation { COPY, MOVE, DTOR, COMP, ADDR, CADDR, REF, CREF, TYPE };
+/**
+ * @brief A SBO friendly, type-safe container for single values of any type.
+ * @tparam Len Size of the storage reserved for the small buffer optimization.
+ * @tparam Align Optional alignment requirement.
+ */
+template<std::size_t Len, std::size_t Align>
+class basic_any {
+    enum class operation: std::uint8_t { COPY, MOVE, DTOR, COMP, ADDR, CADDR, TYPE };
+    enum class policy: std::uint8_t { OWNER, REF, CREF };
 
-    using storage_type = std::aligned_storage_t<sizeof(double[2]), alignof(double[2])>;
-    using vtable_type = const void *(const operation, const any &, const void *);
+    using storage_type = std::aligned_storage_t<Len + !Len, Align>;
+    using vtable_type = const void *(const operation, const basic_any &, void *);
 
     template<typename Type>
-    static constexpr auto in_situ = sizeof(Type) <= sizeof(storage_type) && std::is_nothrow_move_constructible_v<Type>;
+    static constexpr bool in_situ = Len && alignof(Type) <= alignof(storage_type) && sizeof(Type) <= sizeof(storage_type) && std::is_nothrow_move_constructible_v<Type>;
+
+    template<typename Type>
+    [[nodiscard]] static constexpr policy type_to_policy() {
+        if constexpr(std::is_lvalue_reference_v<Type>) {
+            if constexpr(std::is_const_v<std::remove_reference_t<Type>>) {
+                return policy::CREF;
+            } else {
+                return policy::REF;
+            }
+        } else {
+            return policy::OWNER;
+        }
+    }
 
     template<typename Type>
     [[nodiscard]] static bool compare(const void *lhs, const void *rhs) {
@@ -33,186 +55,216 @@ class any {
         }
     }
 
-    static type_info & as_type_info(const void *data) {
-        return *const_cast<type_info *>(static_cast<const type_info *>(data));
-    }
-
-    static any & as_any(const void *data) {
-        return *const_cast<any *>(static_cast<const any *>(data));
-    }
-
     template<typename Type>
-    static const void * basic_vtable([[maybe_unused]] const operation op, [[maybe_unused]] const any &from, [[maybe_unused]] const void *to) {
+    static const void * basic_vtable([[maybe_unused]] const operation op, [[maybe_unused]] const basic_any &from, [[maybe_unused]] void *to) {
+        static_assert(std::is_same_v<std::remove_reference_t<std::remove_const_t<Type>>, Type>, "Invalid type");
+
         if constexpr(!std::is_void_v<Type>) {
-            if constexpr(std::is_lvalue_reference_v<Type>) {
-                using base_type = std::remove_reference_t<Type>;
+            const Type *instance = (in_situ<Type> && from.mode == policy::OWNER)
+                ? ENTT_LAUNDER(reinterpret_cast<const Type *>(&from.storage))
+                : static_cast<const Type *>(from.instance);
 
-                switch(op) {
-                case operation::REF:
-                case operation::CREF:
-                    as_any(to).vtable = (op == operation::REF) ? basic_vtable<Type> : basic_vtable<const base_type &>;
-                    [[fallthrough]];
-                case operation::COPY:
-                case operation::MOVE:
-                    as_any(to).instance = from.instance;
-                    [[fallthrough]];
-                case operation::DTOR:
-                    break;
-                case operation::COMP:
-                    return compare<std::remove_const_t<base_type>>(from.instance, to) ? to : nullptr;
-                case operation::ADDR:
-                    return std::is_const_v<base_type> ? nullptr : from.instance;
-                case operation::CADDR:
-                    return from.instance;
-                case operation::TYPE:
-                    as_type_info(to) = type_id<std::remove_const_t<base_type>>();
-                    break;
+            switch(op) {
+            case operation::COPY:
+                if constexpr(std::is_copy_constructible_v<Type>) {
+                    static_cast<basic_any *>(to)->emplace<Type>(*instance);
                 }
-            } else if constexpr(in_situ<Type>) {
-                #if __cpp_lib_launder >= 201606L
-                auto *instance = const_cast<Type *>(std::launder(reinterpret_cast<const Type *>(&from.storage)));
-                #else
-                auto *instance = const_cast<Type *>(reinterpret_cast<const Type *>(&from.storage));
-                #endif
+                break;
+            case operation::MOVE:
+                if constexpr(in_situ<Type>) {
+                    if(from.mode == policy::OWNER) {
+                        return new (&static_cast<basic_any *>(to)->storage) Type{std::move(*const_cast<Type *>(instance))};
+                    }
+                }
 
-                switch(op) {
-                case operation::COPY:
-                    new (&as_any(to).storage) Type{std::as_const(*instance)};
-                    break;
-                case operation::MOVE:
-                    new (&as_any(to).storage) Type{std::move(*instance)};
-                    [[fallthrough]];
-                case operation::DTOR:
-                    instance->~Type();
-                    break;
-                case operation::COMP:
-                    return compare<Type>(instance, to) ? to : nullptr;
-                case operation::ADDR:
-                case operation::CADDR:
-                    return instance;
-                case operation::REF:
-                case operation::CREF:
-                    as_any(to).vtable = (op == operation::REF) ? basic_vtable<Type &> : basic_vtable<const Type &>;
-                    as_any(to).instance = instance;
-                    break;
-                case operation::TYPE:
-                    as_type_info(to) = type_id<Type>();
-                    break;
+                return (static_cast<basic_any *>(to)->instance = std::exchange(const_cast<basic_any &>(from).instance, nullptr));
+            case operation::DTOR:
+                if(from.mode == policy::OWNER) {
+                    if constexpr(in_situ<Type>) {
+                        instance->~Type();
+                    } else if constexpr(std::is_array_v<Type>) {
+                        delete[] instance;
+                    } else {
+                        delete instance;
+                    }
                 }
-            } else {
-                switch(op) {
-                case operation::COPY:
-                    as_any(to).instance = new Type{*static_cast<const Type *>(from.instance)};
-                    break;
-                case operation::REF:
-                case operation::CREF:
-                    as_any(to).vtable = (op == operation::REF) ? basic_vtable<Type &> : basic_vtable<const Type &>;
-                    [[fallthrough]];
-                case operation::MOVE:
-                    as_any(to).instance = from.instance;
-                    break;
-                case operation::DTOR:
-                    delete static_cast<const Type *>(from.instance);
-                    break;
-                case operation::COMP:
-                    return compare<Type>(from.instance, to) ? to : nullptr;
-                case operation::ADDR:
-                case operation::CADDR:
-                    return from.instance;
-                case operation::TYPE:
-                    as_type_info(to) = type_id<Type>();
-                    break;
+                break;
+            case operation::COMP:
+                return compare<Type>(instance, (*static_cast<const basic_any **>(to))->data()) ? to : nullptr;
+            case operation::ADDR:
+                if(from.mode == policy::CREF) {
+                    return nullptr;
                 }
+                [[fallthrough]];
+            case operation::CADDR:
+                return instance;
+            case operation::TYPE:
+                *static_cast<type_info *>(to) = type_id<Type>();
+                break;
             }
         }
 
         return nullptr;
     }
 
+    template<typename Type, typename... Args>
+    void initialize([[maybe_unused]] Args &&... args) {
+        if constexpr(!std::is_void_v<Type>) {
+            if constexpr(std::is_lvalue_reference_v<Type>) {
+                static_assert(sizeof...(Args) == 1u && (std::is_lvalue_reference_v<Args> && ...), "Invalid arguments");
+                instance = (std::addressof(args), ...);
+            } else if constexpr(in_situ<Type>) {
+                if constexpr(sizeof...(Args) != 0u && std::is_aggregate_v<Type>) {
+                    new (&storage) Type{std::forward<Args>(args)...};
+                } else {
+                    new (&storage) Type(std::forward<Args>(args)...);
+                }
+            } else {
+                if constexpr(sizeof...(Args) != 0u && std::is_aggregate_v<Type>) {
+                    instance = new Type{std::forward<Args>(args)...};
+                } else {
+                    instance = new Type(std::forward<Args>(args)...);
+                }
+            }
+        }
+    }
+
+    basic_any(const basic_any &other, const policy pol) ENTT_NOEXCEPT
+        : instance{other.data()},
+          vtable{other.vtable},
+          mode{pol}
+    {}
+
 public:
+    /*! @brief Size of the internal storage. */
+    static constexpr auto length = Len;
+    /*! @brief Alignment requirement. */
+    static constexpr auto alignment = Align;
+
     /*! @brief Default constructor. */
-    any() ENTT_NOEXCEPT
-        : any{std::in_place_type<void>}
+    basic_any() ENTT_NOEXCEPT
+        : instance{},
+          vtable{&basic_vtable<void>},
+          mode{policy::OWNER}
     {}
 
     /**
-     * @brief Constructs an any by directly initializing the new object.
+     * @brief Constructs a wrapper by directly initializing the new object.
      * @tparam Type Type of object to use to initialize the wrapper.
      * @tparam Args Types of arguments to use to construct the new instance.
      * @param args Parameters to use to construct the instance.
      */
     template<typename Type, typename... Args>
-    explicit any(std::in_place_type_t<Type>, [[maybe_unused]] Args &&... args)
-        : vtable{&basic_vtable<Type>},
-          instance{}
+    explicit basic_any(std::in_place_type_t<Type>, Args &&... args)
+        : instance{},
+          vtable{&basic_vtable<std::remove_const_t<std::remove_reference_t<Type>>>},
+          mode{type_to_policy<Type>()}
     {
-        if constexpr(!std::is_void_v<Type>) {
-            if constexpr(std::is_lvalue_reference_v<Type>) {
-                static_assert(sizeof...(Args) == 1u && (std::is_pointer_v<std::remove_reference_t<Args>> && ...));
-                ENTT_ASSERT(((args != nullptr) && ...));
-                instance = (args, ...);
-            } else if constexpr(in_situ<Type>) {
-                new (&storage) Type{std::forward<Args>(args)...};
-            } else {
-                instance = new Type{std::forward<Args>(args)...};
-            }
-        }
+        initialize<Type>(std::forward<Args>(args)...);
     }
 
     /**
-     * @brief Constructs an any that holds an unmanaged object.
+     * @brief Constructs a wrapper that holds an unmanaged object.
      * @tparam Type Type of object to use to initialize the wrapper.
      * @param value An instance of an object to use to initialize the wrapper.
      */
     template<typename Type>
-    any(std::reference_wrapper<Type> value) ENTT_NOEXCEPT
-        : any{std::in_place_type<Type &>, &value.get()}
-    {}
+    basic_any(std::reference_wrapper<Type> value) ENTT_NOEXCEPT
+        : basic_any{}
+    {
+        // invokes deprecated assignment operator (and avoids issues with vs2017)
+        *this = value;
+    }
 
     /**
-     * @brief Constructs an any from a given value.
+     * @brief Constructs a wrapper from a given value.
      * @tparam Type Type of object to use to initialize the wrapper.
      * @param value An instance of an object to use to initialize the wrapper.
      */
-    template<typename Type, typename = std::enable_if_t<!std::is_same_v<std::remove_cv_t<std::remove_reference_t<Type>>, any>>>
-    any(Type &&value)
-        : any{std::in_place_type<std::remove_cv_t<std::remove_reference_t<Type>>>, std::forward<Type>(value)}
-    {}
+    template<typename Type, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Type>, basic_any>>>
+    basic_any(Type &&value)
+        : instance{},
+          vtable{&basic_vtable<std::decay_t<Type>>},
+          mode{policy::OWNER}
+    {
+        initialize<std::decay_t<Type>>(std::forward<Type>(value));
+    }
 
     /**
      * @brief Copy constructor.
      * @param other The instance to copy from.
      */
-    any(const any &other)
-        : any{}
+    basic_any(const basic_any &other)
+        : instance{},
+          vtable{&basic_vtable<void>},
+          mode{policy::OWNER}
     {
-        vtable = other.vtable;
-        vtable(operation::COPY, other, this);
+        other.vtable(operation::COPY, other, this);
     }
 
     /**
      * @brief Move constructor.
      * @param other The instance to move from.
      */
-    any(any &&other) ENTT_NOEXCEPT
-        : any{}
+    basic_any(basic_any &&other) ENTT_NOEXCEPT
+        : instance{},
+          vtable{other.vtable},
+          mode{other.mode}
     {
-        vtable = std::exchange(other.vtable, &basic_vtable<void>);
         vtable(operation::MOVE, other, this);
     }
 
     /*! @brief Frees the internal storage, whatever it means. */
-    ~any() {
+    ~basic_any() {
         vtable(operation::DTOR, *this, nullptr);
     }
 
     /**
-     * @brief Assignment operator.
-     * @param other The instance to assign from.
+     * @brief Copy assignment operator.
+     * @param other The instance to copy from.
      * @return This any object.
      */
-    any & operator=(any other) {
-        swap(*this, other);
+    basic_any & operator=(const basic_any &other) {
+        reset();
+        other.vtable(operation::COPY, other, this);
+        return *this;
+    }
+
+    /**
+     * @brief Move assignment operator.
+     * @param other The instance to move from.
+     * @return This any object.
+     */
+    basic_any & operator=(basic_any &&other) ENTT_NOEXCEPT {
+        std::exchange(vtable, other.vtable)(operation::DTOR, *this, nullptr);
+        other.vtable(operation::MOVE, other, this);
+        mode = other.mode;
+        return *this;
+    }
+
+    /**
+     * @brief Value assignment operator.
+     * @tparam Type Type of object to use to initialize the wrapper.
+     * @param value An instance of an object to use to initialize the wrapper.
+     * @return This any object.
+     */
+    template<typename Type>
+    [[deprecated("Use std::in_place_type<T &>, entt::make_any<T &>, emplace<Type &> or forward_as_any instead")]]
+    basic_any & operator=(std::reference_wrapper<Type> value) ENTT_NOEXCEPT {
+        emplace<Type &>(value.get());
+        return *this;
+    }
+
+    /**
+     * @brief Value assignment operator.
+     * @tparam Type Type of object to use to initialize the wrapper.
+     * @param value An instance of an object to use to initialize the wrapper.
+     * @return This any object.
+     */
+    template<typename Type>
+    std::enable_if_t<!std::is_same_v<std::decay_t<Type>, basic_any>, basic_any &>
+    operator=(Type &&value) {
+        emplace<std::decay_t<Type>>(std::forward<Type>(value));
         return *this;
     }
 
@@ -221,7 +273,7 @@ public:
      * @return The type of the contained object, if any.
      */
     [[nodiscard]] type_info type() const ENTT_NOEXCEPT {
-        type_info info;
+        type_info info{};
         vtable(operation::TYPE, *this, &info);
         return info;
     }
@@ -247,7 +299,15 @@ public:
      */
     template<typename Type, typename... Args>
     void emplace(Args &&... args) {
-        *this = any{std::in_place_type<Type>, std::forward<Args>(args)...};
+        std::exchange(vtable, &basic_vtable<std::remove_const_t<std::remove_reference_t<Type>>>)(operation::DTOR, *this, nullptr);
+        mode = type_to_policy<Type>();
+        initialize<Type>(std::forward<Args>(args)...);
+    }
+
+    /*! @brief Destroys contained object */
+    void reset() {
+        std::exchange(vtable, &basic_vtable<void>)(operation::DTOR, *this, nullptr);
+        mode = policy::OWNER;
     }
 
     /**
@@ -263,54 +323,49 @@ public:
      * @param other Wrapper with which to compare.
      * @return False if the two objects differ in their content, true otherwise.
      */
-    bool operator==(const any &other) const ENTT_NOEXCEPT {
-        return type() == other.type() && (vtable(operation::COMP, *this, other.data()) == other.data());
-    }
-
-    /**
-     * @brief Swaps two any objects.
-     * @param lhs A valid any object.
-     * @param rhs A valid any object.
-     */
-    friend void swap(any &lhs, any &rhs) {
-        any tmp{};
-        lhs.vtable(operation::MOVE, lhs, &tmp);
-        rhs.vtable(operation::MOVE, rhs, &lhs);
-        lhs.vtable(operation::MOVE, tmp, &rhs);
-        std::swap(lhs.vtable, rhs.vtable);
+    bool operator==(const basic_any &other) const ENTT_NOEXCEPT {
+        const basic_any *trampoline = &other;
+        return type() == other.type() && (vtable(operation::COMP, *this, &trampoline) || !other.data());
     }
 
     /**
      * @brief Aliasing constructor.
-     * @param other A reference to an object that isn't necessarily initialized.
-     * @return An any that shares a reference to an unmanaged object.
+     * @return A wrapper that shares a reference to an unmanaged object.
      */
-    [[nodiscard]] friend any as_ref(any &other) ENTT_NOEXCEPT {
-        any ref{};
-        other.vtable(operation::REF, other, &ref);
-        return ref;
+    [[nodiscard]] basic_any as_ref() ENTT_NOEXCEPT {
+        return basic_any{*this, (mode == policy::CREF ? policy::CREF : policy::REF)};
     }
 
     /*! @copydoc as_ref */
-    [[nodiscard]] friend any as_ref(const any &other) ENTT_NOEXCEPT {
-        any ref{};
-        other.vtable(operation::CREF, other, &ref);
-        return ref;
+    [[nodiscard]] basic_any as_ref() const ENTT_NOEXCEPT {
+        return basic_any{*this, policy::CREF};
+    }
+
+    /**
+     * @brief Returns true if a wrapper owns its object, false otherwise.
+     * @return True if the wrapper owns its object, false otherwise.
+     */
+    [[nodiscard]] bool owner() const ENTT_NOEXCEPT {
+        return (mode == policy::OWNER);
     }
 
 private:
-    vtable_type *vtable;
     union { const void *instance; storage_type storage; };
+    vtable_type *vtable;
+    policy mode;
 };
 
 
 /**
  * @brief Checks if two wrappers differ in their content.
+ * @tparam Len Size of the storage reserved for the small buffer optimization.
+ * @tparam Align Alignment requirement.
  * @param lhs A wrapper, either empty or not.
  * @param rhs A wrapper, either empty or not.
  * @return True if the two wrappers differ in their content, false otherwise.
  */
-[[nodiscard]] inline bool operator!=(const any &lhs, const any &rhs) ENTT_NOEXCEPT {
+template<std::size_t Len, std::size_t Align>
+[[nodiscard]] inline bool operator!=(const basic_any<Len, Align> &lhs, const basic_any<Len, Align> &rhs) ENTT_NOEXCEPT {
     return !(lhs == rhs);
 }
 
@@ -318,49 +373,80 @@ private:
 /**
  * @brief Performs type-safe access to the contained object.
  * @tparam Type Type to which conversion is required.
+ * @tparam Len Size of the storage reserved for the small buffer optimization.
+ * @tparam Align Alignment requirement.
  * @param data Target any object.
  * @return The element converted to the requested type.
  */
-template<typename Type>
-Type any_cast(const any &data) ENTT_NOEXCEPT {
+template<typename Type, std::size_t Len, std::size_t Align>
+Type any_cast(const basic_any<Len, Align> &data) ENTT_NOEXCEPT {
     const auto * const instance = any_cast<std::remove_reference_t<Type>>(&data);
-    ENTT_ASSERT(instance);
+    ENTT_ASSERT(instance, "Invalid instance");
     return static_cast<Type>(*instance);
 }
 
 
 /*! @copydoc any_cast */
-template<typename Type>
-Type any_cast(any &data) ENTT_NOEXCEPT {
+template<typename Type, std::size_t Len, std::size_t Align>
+Type any_cast(basic_any<Len, Align> &data) ENTT_NOEXCEPT {
     // forces const on non-reference types to make them work also with wrappers for const references
-    auto * const instance = any_cast<std::conditional_t<std::is_reference_v<Type>, std::remove_reference_t<Type>, const Type>>(&data);
-    ENTT_ASSERT(instance);
+    auto * const instance = any_cast<std::remove_reference_t<const Type>>(&data);
+    ENTT_ASSERT(instance, "Invalid instance");
     return static_cast<Type>(*instance);
 }
 
 
 /*! @copydoc any_cast */
-template<typename Type>
-Type any_cast(any &&data) ENTT_NOEXCEPT {
+template<typename Type, std::size_t Len, std::size_t Align>
+Type any_cast(basic_any<Len, Align> &&data) ENTT_NOEXCEPT {
     // forces const on non-reference types to make them work also with wrappers for const references
-    auto * const instance = any_cast<std::conditional_t<std::is_reference_v<Type>, std::remove_reference_t<Type>, const Type>>(&data);
-    ENTT_ASSERT(instance);
+    auto * const instance = any_cast<std::remove_reference_t<const Type>>(&data);
+    ENTT_ASSERT(instance, "Invalid instance");
     return static_cast<Type>(std::move(*instance));
 }
 
 
 /*! @copydoc any_cast */
-template<typename Type>
-const Type * any_cast(const any *data) ENTT_NOEXCEPT {
+template<typename Type, std::size_t Len, std::size_t Align>
+const Type * any_cast(const basic_any<Len, Align> *data) ENTT_NOEXCEPT {
     return (data->type() == type_id<Type>() ? static_cast<const Type *>(data->data()) : nullptr);
 }
 
 
 /*! @copydoc any_cast */
-template<typename Type>
-Type * any_cast(any *data) ENTT_NOEXCEPT {
+template<typename Type, std::size_t Len, std::size_t Align>
+Type * any_cast(basic_any<Len, Align> *data) ENTT_NOEXCEPT {
     // last attempt to make wrappers for const references return their values
-    return (data->type() == type_id<Type>() ? static_cast<Type *>(static_cast<constness_as_t<any, Type> *>(data)->data()) : nullptr);
+    return (data->type() == type_id<Type>() ? static_cast<Type *>(static_cast<constness_as_t<basic_any<Len, Align>, Type> *>(data)->data()) : nullptr);
+}
+
+
+/**
+ * @brief Constructs a wrapper from a given type, passing it all arguments.
+ * @tparam Type Type of object to use to initialize the wrapper.
+ * @tparam Len Size of the storage reserved for the small buffer optimization.
+ * @tparam Align Optional alignment requirement.
+ * @tparam Args Types of arguments to use to construct the new instance.
+ * @param args Parameters to use to construct the instance.
+ * @return A properly initialized wrapper for an object of the given type.
+ */
+template<typename Type, std::size_t Len = basic_any<>::length, std::size_t Align = basic_any<Len>::alignment, typename... Args>
+basic_any<Len, Align> make_any(Args &&... args) {
+    return basic_any<Len, Align>{std::in_place_type<Type>, std::forward<Args>(args)...};
+}
+
+
+/**
+ * @brief Forwards its argument and avoids copies for lvalue references.
+ * @tparam Len Size of the storage reserved for the small buffer optimization.
+ * @tparam Align Optional alignment requirement.
+ * @tparam Type Type of argument to use to construct the new instance.
+ * @param value Parameter to use to construct the instance.
+ * @return A properly initialized and not necessarily owning wrapper.
+ */
+template<std::size_t Len = basic_any<>::length, std::size_t Align = basic_any<Len>::alignment, typename Type>
+basic_any<Len, Align> forward_as_any(Type &&value) {
+    return basic_any<Len, Align>{std::in_place_type<std::conditional_t<std::is_rvalue_reference_v<Type>, std::decay_t<Type>, Type>>, std::forward<Type>(value)};
 }
 
 
