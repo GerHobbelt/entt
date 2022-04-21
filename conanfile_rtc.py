@@ -3,7 +3,7 @@ from conans import ConanFile
 
 class EnttConan(ConanFile):
     name = "entt"
-    version = "3.8.1"
+    version = "3.10.0"
     url = "https://github.com/Esri/entt/blob/runtimecore"
     license = "https://github.com/Esri/entt/blob/runtimecore/LICENSE"
     description = (
@@ -19,3 +19,6 @@ class EnttConan(ConanFile):
 
         # headers
         self.copy("*.h*", src=base + "src/entt", dst=relative + "src/entt")
+
+        # visualizers
+        self.copy("*.natvis", src=base + "src/natvis", dst=relative + "src/natvis")
