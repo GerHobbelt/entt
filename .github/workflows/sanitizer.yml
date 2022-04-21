@@ -4,16 +4,14 @@ on: [push, pull_request]
 
 jobs:
 
-  linux:
-    timeout-minutes: 10
+  clang:
+    timeout-minutes: 15
 
     strategy:
       matrix:
         compiler: [clang++]
-        id_type: [uint32, uint64]
-        include:
-          - id_type: uint64
-            id_type_option: -DENTT_BUILD_UINT64=ON
+        id_type: ["std::uint32_t", "std::uint64_t"]
+        cxx_std: [cxx_std_17, cxx_std_20]
 
     runs-on: ubuntu-latest
 
@@ -24,10 +22,10 @@ jobs:
       env:
         CXX: ${{ matrix.compiler }}
       run: |
-        cmake -DENTT_USE_SANITIZER=ON -DENTT_BUILD_TESTING=ON -DENTT_BUILD_LIB=ON -DENTT_BUILD_EXAMPLE=ON ${{ matrix.id_type_option }} ..
+        cmake -DENTT_USE_SANITIZER=ON -DENTT_BUILD_TESTING=ON -DENTT_BUILD_LIB=ON -DENTT_BUILD_EXAMPLE=ON -DENTT_CXX_STD=${{ matrix.cxx_std }} -DENTT_ID_TYPE=${{ matrix.id_type }} ..
         make -j4
     - name: Run tests
       working-directory: build
       env:
         CTEST_OUTPUT_ON_FAILURE: 1
-      run: ctest --timeout 10 -C Debug -j4
+      run: ctest --timeout 30 -C Debug -j4

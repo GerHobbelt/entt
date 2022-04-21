@@ -1,4 +1,5 @@
 #include <array>
+#include <vector>
 #include <gtest/gtest.h>
 #include <entt/core/algorithm.hpp>
 
@@ -14,7 +15,7 @@ TEST(Algorithm, StdSort) {
     sort(arr.begin(), arr.end());
 
     for(auto i = 0u; i < (arr.size() - 1u); ++i) {
-        ASSERT_LT(arr[i], arr[i+1u]);
+        ASSERT_LT(arr[i], arr[i + 1u]);
     }
 }
 
@@ -28,7 +29,7 @@ TEST(Algorithm, StdSortBoxedInt) {
     });
 
     for(auto i = 0u; i < (arr.size() - 1u); ++i) {
-        ASSERT_GT(arr[i].value, arr[i+1u].value);
+        ASSERT_GT(arr[i].value, arr[i + 1u].value);
     }
 }
 
@@ -39,7 +40,7 @@ TEST(Algorithm, InsertionSort) {
     sort(arr.begin(), arr.end());
 
     for(auto i = 0u; i < (arr.size() - 1u); ++i) {
-        ASSERT_LT(arr[i], arr[i+1u]);
+        ASSERT_LT(arr[i], arr[i + 1u]);
     }
 }
 
@@ -52,7 +53,7 @@ TEST(Algorithm, InsertionSortBoxedInt) {
     });
 
     for(auto i = 0u; i < (arr.size() - 1u); ++i) {
-        ASSERT_GT(arr[i].value, arr[i+1u].value);
+        ASSERT_GT(arr[i].value, arr[i + 1u].value);
     }
 }
 
@@ -72,7 +73,7 @@ TEST(Algorithm, RadixSort) {
     });
 
     for(auto i = 0u; i < (arr.size() - 1u); ++i) {
-        ASSERT_LT(arr[i], arr[i+1u]);
+        ASSERT_LT(arr[i], arr[i + 1u]);
     }
 }
 
@@ -85,7 +86,7 @@ TEST(Algorithm, RadixSortBoxedInt) {
     });
 
     for(auto i = 0u; i < (arr.size() - 1u); ++i) {
-        ASSERT_GT(arr[i].value, arr[i+1u].value);
+        ASSERT_GT(arr[i].value, arr[i + 1u].value);
     }
 }
 

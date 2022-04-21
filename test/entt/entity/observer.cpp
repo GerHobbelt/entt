@@ -1,6 +1,4 @@
-#include <tuple>
-#include <cstddef>
-#include <type_traits>
+#include <utility>
 #include <gtest/gtest.h>
 #include <entt/entity/observer.hpp>
 #include <entt/entity/registry.hpp>
@@ -37,7 +35,8 @@ TEST(Observer, Functionalities) {
 }
 
 TEST(Observer, AllOf) {
-    constexpr auto collector =  entt::collector
+    constexpr auto collector =
+        entt::collector
             .group<int, char>(entt::exclude<float>)
             .group<int, double>();
 
@@ -85,8 +84,10 @@ TEST(Observer, AllOf) {
 }
 
 TEST(Observer, AllOfFiltered) {
-    constexpr auto collector =  entt::collector
-            .group<int>().where<char>(entt::exclude<double>);
+    constexpr auto collector =
+        entt::collector
+            .group<int>()
+            .where<char>(entt::exclude<double>);
 
     entt::registry registry;
     entt::observer observer{registry, collector};
@@ -164,8 +165,10 @@ TEST(Observer, Observe) {
 }
 
 TEST(Observer, ObserveFiltered) {
-    constexpr auto collector =  entt::collector
-            .update<int>().where<char>(entt::exclude<double>);
+    constexpr auto collector =
+        entt::collector
+            .update<int>()
+            .where<char>(entt::exclude<double>);
 
     entt::registry registry;
     entt::observer observer{registry, collector};
@@ -282,9 +285,12 @@ TEST(Observer, Each) {
 }
 
 TEST(Observer, MultipleFilters) {
-    constexpr auto collector =  entt::collector
-            .update<int>().where<char>()
-            .update<double>().where<float>();
+    constexpr auto collector =
+        entt::collector
+            .update<int>()
+            .where<char>()
+            .update<double>()
+            .where<float>();
 
     entt::registry registry;
     entt::observer observer{registry, collector};
@@ -338,8 +344,8 @@ TEST(Observer, MultipleFilters) {
 }
 
 TEST(Observer, GroupCornerCase) {
-    constexpr auto add_collector =  entt::collector.group<int>(entt::exclude<char>);
-    constexpr auto remove_collector =  entt::collector.group<int, char>();
+    constexpr auto add_collector = entt::collector.group<int>(entt::exclude<char>);
+    constexpr auto remove_collector = entt::collector.group<int, char>();
 
     entt::registry registry;
     entt::observer add_observer{registry, add_collector};
