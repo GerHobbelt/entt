@@ -21,4 +21,4 @@ class EnttConan(ConanFile):
         self.copy("*.h*", src=base + "src/entt", dst=relative + "src/entt")
 
         # visualizers
-        self.copy("*.natvis", src=base + "src/natvis", dst=relative + "src/natvis")
+        self.copy("*.natvis", src=base + "natvis", dst=relative + "natvis")
