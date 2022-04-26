@@ -28,6 +28,8 @@ I hope this list can grow much more in the future:
     ECS that uses sparse sets to keep track of entities in systems.
   * [EntityX](https://github.com/alecthomas/entityx): a bitset based ECS that
     uses a single large matrix of components indexed with entities.
+  * [Gaia-ECS](https://github.com/richardbiely/gaia-ecs): a chunk based
+    archetype ECS.
   * [Polypropylene](https://github.com/pmbittner/Polypropylene): a hybrid
     solution between an ECS and dynamic mixins.
 
@@ -44,15 +46,25 @@ I hope this list can grow much more in the future:
     by `EnTT`.
 
 * Javascript:
-  * [\@javelin/ecs](https://github.com/3mcd/javelin/tree/master/packages/ecs): an
-    archetype ECS in TypeScript.
+  * [\@javelin/ecs](https://github.com/3mcd/javelin/tree/master/packages/ecs):
+    an archetype ECS in TypeScript.
   * [ecsy](https://github.com/MozillaReality/ecsy): I haven't had the time to
     investigate the underlying design of `ecsy` but it looks cool anyway.
+
+* Perl:
+  * [Game::Entities](https://gitlab.com/jjatria/perl-game-entities): a simple
+    entity registry for ECS designs inspired by `EnTT`.
+
+* Raku:
+  * [Game::Entities](https://gitlab.com/jjatria/raku-game-entities): a simple
+    entity registry for ECS designs inspired by `EnTT`.
 
 * Rust:
   * [Legion](https://github.com/TomGillen/legion): a chunk based archetype ECS.
   * [Shipyard](https://github.com/leudz/shipyard): it borrows some ideas from
     `EnTT` and offers a sparse sets based ECS with grouping functionalities.
+  * [Sparsey](https://github.com/LechintanTudor/sparsey): sparse set based ECS
+    written in Rust.
   * [Specs](https://github.com/amethyst/specs): a parallel ECS based mainly on
     hierarchical bitsets that allows different types of storage as needed.
 

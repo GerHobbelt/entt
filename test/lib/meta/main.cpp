@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <entt/core/attribute.h>
+#include <entt/core/hashed_string.hpp>
 #include <entt/meta/factory.hpp>
 #include <entt/meta/meta.hpp>
 #include <entt/meta/resolve.hpp>
@@ -25,7 +26,7 @@ TEST(Lib, Meta) {
     ASSERT_EQ(entt::resolve<velocity>(), entt::resolve("velocity"_hs));
 
     auto pos = entt::resolve("position"_hs).construct(42., 3.);
-    auto vel = entt::resolve("velocity"_hs).ctor<>().invoke();
+    auto vel = entt::resolve("velocity"_hs).construct();
 
     ASSERT_TRUE(pos && vel);
 
