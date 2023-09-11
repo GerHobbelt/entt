@@ -14,6 +14,10 @@
 * [Hashed strings](#hashed-strings)
   * [Wide characters](wide-characters)
   * [Conflicts](#conflicts)
+* [Iterators](#iterators)
+  * [Input iterator pointer](#input-iterator-pointer)
+  * [Iota iterator](#iota-iterator)
+  * [Iterable adaptor](#iterable-adaptor)
 * [Memory](#memory)
   * [Power of two and fast modulus](#power-of-two-and-fast-modulus)
   * [Allocator aware unique pointers](#allocator-aware-unique-pointers)
@@ -27,6 +31,7 @@
     * [Is applicable](#is-applicable)
     * [Constness as](#constness-as)
     * [Member class type](#member-class-type)
+    * [N-th argument](#n-th-argument)
     * [Integral constant](#integral-constant)
     * [Tag](#tag)
     * [Type list and value list](#type-list-and-value-list)
@@ -41,25 +46,24 @@
 # Introduction
 
 `EnTT` comes with a bunch of core functionalities mostly used by the other parts
-of the library itself.<br/>
-Hardly users will include these features in their code, but it's worth
-describing what `EnTT` offers so as not to reinvent the wheel in case of need.
+of the library.<br/>
+Many of these tools are also useful in everyday work. Therefore, it's worth
+describing them so as not to reinvent the wheel in case of need.
 
 # Any as in any type
 
-`EnTT` comes with its own `any` type. It may seem redundant considering that
-C++17 introduced `std::any`, but it is not (hopefully).<br/>
+`EnTT` offers its own `any` type. It may seem redundant considering that C++17
+introduced `std::any`, but it is not (hopefully).<br/>
 First of all, the _type_ returned by an `std::any` is a const reference to an
 `std::type_info`, an implementation defined class that's not something everyone
-wants to see in a software. Furthermore, there is no way to connect it with the
-type system of the library and therefore with its integrated RTTI support.<br/>
-Note that this class is largely used internally by the library itself.
+wants to see in a software. Furthermore, there is no way to bind it to the type
+system of the library and therefore with its integrated RTTI support.
 
-The API is very similar to that of its most famous counterpart, mainly because
-this class serves the same purpose of being an opaque container for any type of
-value.<br/>
-Instances of `any` also minimize the number of allocations by relying on a well
-known technique called _small buffer optimization_ and a fake vtable.
+The `any` API is very similar to that of its most famous counterpart, mainly
+because this class serves the same purpose of being an opaque container for any
+type of value.<br/>
+Instances also minimize the number of allocations by relying on a well known
+technique called _small buffer optimization_ and a fake vtable.
 
 Creating an object of the `any` type, whether empty or not, is trivial:
 
@@ -88,8 +92,8 @@ Furthermore, an instance of `any` isn't tied to an actual type. Therefore, the
 wrapper is reconfigured when it's assigned a new object of a type other than
 the one it contains.
 
-There exists also a way to directly assign a value to the variable contained by
-an `entt::any`, without necessarily replacing it. This is especially useful when
+There is also a way to directly assign a value to the variable contained by an
+`entt::any`, without necessarily replacing it. This is especially useful when
 the object is used in _aliasing mode_, as described below:
 
 ```cpp
@@ -103,15 +107,15 @@ any.assign(value);
 any.assign(std::move(value));
 ```
 
-The `any` class will also perform a check on the type information and whether or
-not the original type was copy or move assignable, as appropriate.<br/>
-In all cases, the `assign` function returns a boolean value to indicate the
-success or failure of the operation.
+The `any` class performs a check on the type information and whether or not the
+original type was copy or move assignable, as appropriate.<br/>
+In all cases, the `assign` function returns a boolean value that is true in case
+of success and false otherwise.
 
-When in doubt about the type of object contained, the `type` member function of
-`any` returns a const reference to the `type_info` associated with its element,
-or `type_id<void>()` if the container is empty. The type is also used internally
-when comparing two `any` objects:
+When in doubt about the type of object contained, the `type` member function
+returns a const reference to the `type_info` associated with its element, or
+`type_id<void>()` if the container is empty.<br/>
+The type is also used internally when comparing two `any` objects:
 
 ```cpp
 if(any == empty) { /* ... */ }
@@ -120,7 +124,7 @@ if(any == empty) { /* ... */ }
 In this case, before proceeding with a comparison, it's verified that the _type_
 of the two objects is actually the same.<br/>
 Refer to the `EnTT` type system documentation for more details about how
-`type_info` works and on possible risks of a comparison.
+`type_info` works and the possible risks of a comparison.
 
 A particularly interesting feature of this class is that it can also be used as
 an opaque container for const and non-const references:
@@ -148,22 +152,19 @@ entt::any ref = other.as_ref();
 ```
 
 In this case, it doesn't matter if the original container actually holds an
-object or acts already as a reference for unmanaged elements, the new instance
-thus created won't create copies and will only serve as a reference for the
-original item.<br/>
-This means that, starting from the example above, both `ref` and `other` will
-point to the same object, whether it's initially contained in `other` or already
-an unmanaged element.
+object or is as a reference for unmanaged elements already. The new instance
+thus created doesn't create copies and only serves as a reference for the
+original item.
 
-As a side note, it's worth mentioning that, while everything works transparently
-when it comes to non-const references, there are some exceptions when it comes
-to const references.<br/>
+It's worth mentioning that, while everything works transparently when it comes
+to non-const references, there are some exceptions when it comes to const
+references.<br/>
 In particular, the `data` member function invoked on a non-const instance of
-`any` that wraps a const reference will return a null pointer in all cases.
+`any` that wraps a const reference returns a null pointer in all cases.
 
 To cast an instance of `any` to a type, the library offers a set of `any_cast`
 functions in all respects similar to their most famous counterparts.<br/>
-The only difference is that, in the case of `EnTT`, these won't raise exceptions
+The only difference is that, in the case of `EnTT`, they won't raise exceptions
 but will only trigger an assert in debug mode, otherwise resulting in undefined
 behavior in case of misuse in release mode.
 
@@ -183,31 +184,23 @@ using my_any = entt::basic_any<sizeof(double[4])>;
 This feature, in addition to allowing the choice of a size that best suits the
 needs of an application, also offers the possibility of forcing dynamic creation
 of objects during construction.<br/>
-In other terms, if the size is 0, `any` avoids the use of any optimization and
-always dynamically allocates objects (except for aliasing cases).
-
-Note that the size of the internal storage as well as the alignment requirements
-are directly part of the type and therefore contribute to define different types
-that won't be able to interoperate with each other.
+In other terms, if the size is 0, `any` suppresses the small buffer optimization
+and always dynamically allocates objects (except for aliasing cases).
 
 ## Alignment requirement
 
 The alignment requirement is optional and by default the most stringent (the
 largest) for any object whose size is at most equal to the one provided.<br/>
-The `basic_any` class template inspects the alignment requirements in each case,
-even when not provided and may decide not to use the small buffer optimization
-in order to meet them.
-
-The alignment requirement is provided as an optional second parameter following
-the desired size for the internal storage:
+It's provided as an optional second parameter following the desired size for the
+internal storage:
 
 ```cpp
 using my_any = entt::basic_any<sizeof(double[4]), alignof(double[4])>;
 ```
 
-Note that the alignment requirements as well as the size of the internal storage
-are directly part of the type and therefore contribute to define different types
-that won't be able to interoperate with each other.
+The `basic_any` class template inspects the alignment requirements in each case,
+even when not provided and may decide not to use the small buffer optimization
+in order to meet them.
 
 # Compressed pair
 
@@ -220,8 +213,8 @@ is more important than having some cool and probably useless feature.
 
 Although the API is very close to that of `std::pair` (apart from the fact that
 the template parameters are inferred from the constructor and therefore there is
-no` entt::make_compressed_pair`), the major difference is that `first` and
-`second` are functions for implementation needs:
+no `entt::make_compressed_pair`), the major difference is that `first` and
+`second` are functions for implementation requirements:
 
 ```cpp
 entt::compressed_pair pair{0, 3.};
@@ -234,16 +227,15 @@ intuition. At the end of the day, it's just a pair and nothing more.
 # Enum as bitmask
 
 Sometimes it's useful to be able to use enums as bitmasks. However, enum classes
-aren't really suitable for the purpose out of the box. Main problem is that they
-don't convert implicitly to their underlying type.<br/>
-All that remains is to make a choice between using old-fashioned enums (with all
-their problems that I don't want to discuss here) or writing _ugly_ code.
+aren't really suitable for the purpose. Main problem is that they don't convert
+implicitly to their underlying type.<br/>
+The choice is then between using old-fashioned enums (with all their problems
+that I don't want to discuss here) or writing _ugly_ code.
 
 Fortunately, there is also a third way: adding enough operators in the global
-scope to treat enum classes as bitmask transparently.<br/>
-The ultimate goal is to be able to write code like the following (or maybe
-something more meaningful, but this should give a grasp and remain simple at the
-same time):
+scope to treat enum classes as bitmasks transparently.<br/>
+The ultimate goal is to write code like the following (or maybe something more
+meaningful, but this should give a grasp and remain simple at the same time):
 
 ```cpp
 enum class my_flag {
@@ -256,11 +248,11 @@ const my_flag flags = my_flag::enabled;
 const bool is_enabled = !!(flags & my_flag::enabled);
 ```
 
-The problem with adding all operators to the global scope is that these will
-come into play even when not required, with the risk of introducing errors that
-are difficult to deal with.<br/>
+The problem with adding all operators to the global scope is that these come
+into play even when not required, with the risk of introducing errors that are
+difficult to deal with.<br/>
 However, C++ offers enough tools to get around this problem. In particular, the
-library requires users to register all enum classes for which bitmask support
+library requires users to register the enum classes for which bitmask support
 should be enabled:
 
 ```cpp
@@ -271,7 +263,7 @@ struct entt::enum_as_bitmask<my_flag>
 ```
 
 This is handy when dealing with enum classes defined by third party libraries
-and over which the users have no control. However, it's also verbose and can be
+and over which the user has no control. However, it's also verbose and can be
 avoided by adding a specific value to the enum class itself:
 
 ```cpp
@@ -284,23 +276,21 @@ enum class my_flag {
 ```
 
 In this case, there is no need to specialize the `enum_as_bitmask` traits, since
-`EnTT` will automatically detect the flag and enable the bitmask support.<br/>
-Once the enum class has been registered (in one way or the other) all the most
-common operators will be available, such as `&`, `|` but also `&=` and `|=`.
+`EnTT` automatically detects the flag and enables the bitmask support.<br/>
+Once the enum class is registered (in one way or the other), the most common
+operators such as `&`, `|` but also `&=` and `|=` are available for use.
+
 Refer to the official documentation for the full list of operators.
 
 # Hashed strings
 
-A hashed string is a zero overhead unique identifier. Users can use
-human-readable identifiers in the codebase while using their numeric
-counterparts at runtime, thus without affecting performance.<br/>
+Hashed strings are human-readable identifiers in the codebase that turn into
+numeric values at runtime, thus without affecting performance.<br/>
 The class has an implicit `constexpr` constructor that chews a bunch of
-characters. Once created, all what one can do with it is getting back the
-original string through the `data` member function or converting the instance
-into a number.<br/>
-The good part is that a hashed string can be used wherever a constant expression
-is required and no _string-to-number_ conversion will take place at runtime if
-used carefully.
+characters. Once created, one can get the original string by means of the `data`
+member function or convert the instance into a number.<br/>
+A hashed string is well suited wherever a constant expression is required. No
+_string-to-number_ conversion will take place at runtime if used carefully.
 
 Example of use:
 
@@ -313,19 +303,18 @@ auto resource = load(entt::hashed_string{"gui/background"});
 ```
 
 There is also a _user defined literal_ dedicated to hashed strings to make them
-more user-friendly:
+more _user-friendly_:
 
 ```cpp
 using namespace entt::literals;
 constexpr auto str = "text"_hs;
 ```
 
-To use it, remember that all user defined literals in `EnTT` are enclosed in the
-`entt::literals` namespace. Therefore, the entire namespace or selectively the
-literal of interest must be explicitly included before each use, a bit like
-`std::literals`.<br/>
-Finally, in case users need to create hashed strings at runtime, this class also
-offers the necessary functionalities:
+User defined literals in `EnTT` are enclosed in the `entt::literals` namespace.
+Therefore, the entire namespace or selectively the literal of interest must be
+explicitly included before each use, a bit like `std::literals`.<br/>
+The class also offers the necessary functionalities to create hashed strings at
+runtime:
 
 ```cpp
 std::string orig{"text"};
@@ -338,16 +327,14 @@ const auto hash = entt::hashed_string::value(orig.c_str());
 ```
 
 This possibility shouldn't be exploited in tight loops, since the computation
-takes place at runtime and no longer at compile-time and could therefore impact
+takes place at runtime and no longer at compile-time. It could therefore affect
 performance to some degrees.
 
 ## Wide characters
 
-The hashed string has a design that is close to that of an `std::basic_string`.
-It means that `hashed_string` is nothing more than an alias for
-`basic_hashed_string<char>`. For those who want to use the C++ type for wide
-character representation, there exists also the alias `hashed_wstring` for
-`basic_hashed_string<wchar_t>`.<br/>
+The `hashed_string` class is an alias  for `basic_hashed_string<char>`. To use
+the C++ type for wide character representations, there exists also the alias
+`hashed_wstring` for `basic_hashed_string<wchar_t>`.<br/>
 In this case, the user defined literal to use to create hashed strings on the
 fly is `_hws`:
 
@@ -355,28 +342,99 @@ fly is `_hws`:
 constexpr auto str = L"text"_hws;
 ```
 
-Note that the hash type of the `hashed_wstring` is the same of its counterpart.
+The hash type of `hashed_wstring` is the same as its counterpart.
 
 ## Conflicts
 
-The hashed string class uses internally FNV-1a to compute the numeric
-counterpart of a string. Because of the _pigeonhole principle_, conflicts are
-possible. This is a fact.<br/>
+The hashed string class uses FNV-1a internally to hash strings. Because of the
+_pigeonhole principle_, conflicts are possible. This is a fact.<br/>
 There is no silver bullet to solve the problem of conflicts when dealing with
-hashing functions. In this case, the best solution seemed to be to give up.
-That's all.<br/>
+hashing functions. In this case, the best solution is likely to give up. That's
+all.<br/>
 After all, human-readable unique identifiers aren't something strictly defined
 and over which users have not the control. Choosing a slightly different
 identifier is probably the best solution to make the conflict disappear in this
 case.
 
+# Iterators
+
+Writing and working with iterators isn't always easy. More often than not it
+also leads to duplicated code.<br/>
+`EnTT` tries to overcome this problem by offering some utilities designed to
+make this hard work easier.
+
+## Input iterator pointer
+
+When writing an input iterator that returns in-place constructed values if
+dereferenced, it's not always straightforward to figure out what `value_type` is
+and how to make it behave like a full-fledged pointer.<br/>
+Conversely, it would be very useful to have an `operator->` available on the
+iterator itself that always works without too much complexity.
+
+The input iterator pointer is meant for this. It's a small class that wraps the
+in-place constructed value and adds some functions on top of it to make it
+suitable for use with input iterators: 
+
+```cpp
+struct iterator_type {
+    using value_type = std::pair<first_type, second_type>;
+    using pointer = input_iterator_pointer<value_type>;
+    using reference = value_type;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category = std::input_iterator_tag;
+
+    // ...
+}
+```
+
+The library makes extensive use of this class internally. In many cases, the
+`value_type` of the returned iterators is just an input iterator pointer.
+
+## Iota iterator
+
+Waiting for C++20, this iterator accepts an integral value and returns all
+elements in a certain range:
+
+```cpp
+entt::iota_iterator first{0};
+entt::iota_iterator last{100};
+
+for(; first != last; ++first) {
+    int value = *first;
+    // ...
+}
+```
+
+In the future, views will replace this class. Meanwhile, the library makes some
+interesting uses of it when a range of integral values is to be returned to the
+user.
+
+## Iterable adaptor
+
+Typically, a container class provides `begin` and `end` member functions (with
+their const counterparts) for iteration.<br/>
+However, it can happen that a class offers multiple iteration methods or allows
+users to iterate different sets of _elements_.
+
+The iterable adaptor is a utility class that makes it easier to use and access
+data in this case.<br/>
+It accepts a couple of iterators (or an iterator and a sentinel) and offers an
+_iterable_ object with all the expected methods like `begin`, `end` and whatnot.
+
+The library uses this class extensively.<br/>
+Think for example of views, which can be iterated to access entities but also
+offer a method of obtaining an iterable object that returns tuples of entities
+and components at once.<br/>
+Another example is the registry class which allows users to iterate its storage
+by returning an iterable object for the purpose.
+
 # Memory
 
-There are a handful of tools within EnTT to interact with memory in one way or
+There are a handful of tools within `EnTT` to interact with memory in one way or
 another.<br/>
 Some are geared towards simplifying the implementation of (internal or external)
-allocator aware containers. Others, on the other hand, are designed to help the
-developer with everyday problems.
+allocator aware containers. Others are designed to help the developer with
+everyday problems.
 
 The former are very specific and for niche problems. These are tools designed to
 unwrap fancy or plain pointers (`to_address`) or to help forget the meaning of
@@ -404,7 +462,7 @@ modulus and for this reason preferred in many areas.
 
 A nasty thing in C++ (at least up to C++20) is the fact that shared pointers
 support allocators while unique pointers don't.<br/>
-There is a proposal at the moment that also shows among the other things how
+There is a proposal at the moment that also shows (among the other things) how
 this can be implemented without any compiler support.
 
 The `allocate_unique` function follows this proposal, making a virtue out of
@@ -421,13 +479,16 @@ the same feature.
 # Monostate
 
 The monostate pattern is often presented as an alternative to a singleton based
-configuration system. This is exactly its purpose in `EnTT`. Moreover, this
-implementation is thread safe by design (hopefully).<br/>
-Keys are represented by hashed strings, values are basic types like `int`s or
-`bool`s. Values of different types can be associated to each key, even more than
-one at a time. Because of this, users must pay attention to use the same type
-both during an assignment and when they try to read back their data. Otherwise,
-they will probably incur in unexpected results.
+configuration system.<br/>
+This is exactly its purpose in `EnTT`. Moreover, this implementation is thread
+safe by design (hopefully).
+
+Keys are integral values (easily obtained by hashed strings), values are basic
+types like `int`s or `bool`s. Values of different types can be associated with
+each key, even more than one at a time.<br/>
+Because of this, one should pay attention to use the same type both during an
+assignment and when trying to read back the data. Otherwise, there is the risk
+to incur in unexpected results.
 
 Example of use:
 
@@ -465,16 +526,9 @@ Basically, the whole system relies on a handful of classes. In particular:
   auto index = entt::type_index<a_type>::value();
   ```
 
-  The returned value isn't guaranteed to be stable across different runs.
+  The returned value isn't guaranteed to be stable across different runs.<br/>
   However, it can be very useful as index in associative and unordered
   associative containers or for positional accesses in a vector or an array.
-  
-  So as not to conflict with the other tools available, the `family` class isn't
-  used to generate these indexes. Therefore, the numeric identifiers returned by
-  the two tools may differ.<br/>
-  On the other hand, this leaves users with full powers over the `family` class
-  and therefore the generation of custom runtime sequences of indices for their
-  own purposes, if necessary.
   
   An external generator can also be used if needed. In fact, `type_index` can be
   specialized by type and is also _sfinae-friendly_ in order to allow more
@@ -483,13 +537,13 @@ Basically, the whole system relies on a handful of classes. In particular:
   ```cpp
   template<typename Type>
   struct entt::type_index<Type, std::void_d<decltype(Type::index())>> {
-      static entt::id_type value() ENTT_NOEXCEPT {
+      static entt::id_type value() noexcept {
           return Type::index();
       }
   };
   ```
   
-  Note that indexes **must** still be generated sequentially in this case.<br/>
+  Indexes **must** be sequentially generated in this case.<br/>
   The tool is widely used within `EnTT`. Generating indices not sequentially
   would break an assumption and would likely lead to undesired behaviors.
 
@@ -506,14 +560,14 @@ Basically, the whole system relies on a handful of classes. In particular:
   This function **can** use non-standard features of the language for its own
   purposes. This makes it possible to provide compile-time identifiers that
   remain stable across different runs.<br/>
-  In all cases, users can prevent the library from using these features by means
-  of the `ENTT_STANDARD_CPP` definition. In this case, there is no guarantee
-  that identifiers remain stable across executions. Moreover, they are generated
+  Users can prevent the library from using these features by means of the
+  `ENTT_STANDARD_CPP` definition. In this case, there is no guarantee that
+  identifiers remain stable across executions. Moreover, they are generated
   at runtime and are no longer a compile-time thing.
 
-  As for `type_index`, also `type_hash` is a _sfinae-friendly_ class that can be
-  specialized in order to customize its behavior globally or on a per-type or
-  per-traits basis.
+  As it happens with `type_index`, also `type_hash` is a _sfinae-friendly_ class
+  that can be specialized in order to customize its behavior globally or on a
+  per-type or per-traits basis.
 
 * The name associated with a given type:
 
@@ -521,10 +575,9 @@ Basically, the whole system relies on a handful of classes. In particular:
   auto name = entt::type_name<a_type>::value();
   ```
 
-  The name associated with a type is extracted from some information generally
-  made available by the compiler in use. Therefore, it may differ depending on
-  the compiler and may be empty in the event that this information isn't
-  available.<br/>
+  This value is extracted from some information generally made available by the
+  compiler in use. Therefore, it may differ depending on the compiler and may be
+  empty in the event that this information isn't available.<br/>
   For example, given the following class:
 
   ```cpp
@@ -535,21 +588,20 @@ Basically, the whole system relies on a handful of classes. In particular:
   when MSVC is in use.<br/>
   Most of the time the name is also retrieved at compile-time and is therefore
   always returned through an `std::string_view`. Users can easily access it and
-  modify it as needed, for example by removing the word `struct` to standardize
-  the result. `EnTT` won't do this for obvious reasons, since it requires
-  copying and creating a new string potentially at runtime.
+  modify it as needed, for example by removing the word `struct` to normalize
+  the result. `EnTT` doesn't do this for obvious reasons, since it would be
+  creating a new string at runtime otherwise.
 
   This function **can** use non-standard features of the language for its own
-  purposes. Users can prevent the library from using non-standard features by
-  means of the `ENTT_STANDARD_CPP` definition. In this case, the name will be
-  empty by default.
+  purposes. Users can prevent the library from using these features by means of
+  the `ENTT_STANDARD_CPP` definition. In this case, the name is just empty.
 
-  As for `type_index`, also `type_name` is a _sfinae-friendly_ class that can be
-  specialized in order to customize its behavior globally or on a per-type or
-  per-traits basis.
+  As it happens with `type_index`, also `type_name` is a _sfinae-friendly_ class
+  that can be specialized in order to customize its behavior globally or on a
+  per-type or per-traits basis.
 
 These are then combined into utilities that aim to offer an API that is somewhat
-similar to that offered by the language.
+similar to that made available by the standard library.
 
 ### Type info
 
@@ -631,8 +683,8 @@ In fact, although this is quite rare, it's not entirely excluded.
 
 Another case where two types are assigned the same identifier is when classes
 from different contexts (for example two or more libraries loaded at runtime)
-have the same fully qualified name. In this case, also `type_name` will return
-the same value for the two types.<br/>
+have the same fully qualified name. In this case, `type_name` returns the same
+value for the two types.<br/>
 Fortunately, there are several easy ways to deal with this:
 
 * The most trivial one is to define the `ENTT_STANDARD_CPP` macro. Runtime
@@ -662,9 +714,9 @@ offered by this module.
 
 ### Size of
 
-The standard operator `sizeof` complains when users provide it for example with
-function or incomplete types. On the other hand, it's guaranteed that its result
-is always nonzero, even if applied to an empty class type.<br/>
+The standard operator `sizeof` complains if users provide it with functions or
+incomplete types. On the other hand, it's guaranteed that its result is always
+non-zero, even if applied to an empty class type.<br/>
 This small class combines the two and offers an alternative to `sizeof` that
 works under all circumstances, returning zero if the type isn't supported:
 
@@ -693,15 +745,15 @@ tuple-like type and simplify the code at the call site.
 
 ### Constness as
 
-An utility to easily transfer the constness of a type to another type:
+A utility to easily transfer the constness of a type to another type:
 
 ```cpp
 // type is const dst_type because of the constness of src_type
 using type = entt::constness_as_t<dst_type, const src_type>;
 ```
 
-The trait is subject to the rules of the language. Therefore, for example,
-transferring constness between references won't give the desired effect.
+The trait is subject to the rules of the language. For example, _transferring_
+constness between references won't give the desired effect.
 
 ### Member class type
 
@@ -714,6 +766,18 @@ The purpose of this utility is to extract the class type in a few lines of code:
 template<typename Member>
 using clazz = entt::member_class_t<Member>;
 ```
+
+### N-th argument
+
+A utility to quickly find the n-th argument of a function, member function or
+data member (for blind operations on opaque types):
+
+```cpp
+using type = entt::nth_argument_t<1u, &clazz::member>;
+```
+
+Disambiguation of overloaded functions is the responsibility of the user, should
+it be needed.
 
 ### Integral constant
 
@@ -736,8 +800,8 @@ registry.emplace<enemy_tag>(entity);
 
 ### Tag
 
-Since `id_type` is very important and widely used in `EnTT`, there is a more
-user-friendly shortcut for the creation of integral constants based on it.<br/>
+Type `id_type` is very important and widely used in `EnTT`. Therefore, there is
+a more user-friendly shortcut for the creation of constants based on it.<br/>
 This shortcut is the alias template `entt::tag`.
 
 If used in combination with hashed strings, it helps to use human-readable names
@@ -762,10 +826,12 @@ Here is a (possibly incomplete) list of the functionalities that come with a
 type list:
 
 * `type_list_element[_t]` to get the N-th element of a type list.
+* `type_list_index[_v]` to get the index of a given element of a type list.
 * `type_list_cat[_t]` and a handy `operator+` to concatenate type lists.
 * `type_list_unique[_t]` to remove duplicate types from a type list.
 * `type_list_contains[_v]` to know if a type list contains a given type.
 * `type_list_diff[_t]` to remove types from type lists.
+* `type_list_transform[_t]` to _transform_ a range and create another type list.
 
 I'm also pretty sure that more and more utilities will be added over time as
 needs become apparent.<br/>
@@ -784,19 +850,19 @@ that fully embraces what the modern C++ has to offer.
 ## Compile-time generator
 
 To generate sequential numeric identifiers at compile-time, `EnTT` offers the
-`identifier` class template:
+`ident` class template:
 
 ```cpp
 // defines the identifiers for the given types
-using id = entt::identifier<a_type, another_type>;
+using id = entt::ident<a_type, another_type>;
 
 // ...
 
 switch(a_type_identifier) {
-case id::type<a_type>:
+case id::value<a_type>:
     // ...
     break;
-case id::type<another_type>:
+case id::value<another_type>:
     // ...
     break;
 default:
@@ -804,21 +870,21 @@ default:
 }
 ```
 
-This is all what this class template has to offer: a `type` inline variable that
+This is what this class template has to offer: a `value` inline variable that
 contains a numeric identifier for the given type. It can be used in any context
 where constant expressions are required.
 
 As long as the list remains unchanged, identifiers are also guaranteed to be
 stable across different runs. In case they have been used in a production
-environment and a type has to be removed, one can just use a placeholder to left
-the other identifiers unchanged:
+environment and a type has to be removed, one can just use a placeholder to
+leave the other identifiers unchanged:
 
 ```cpp
 template<typename> struct ignore_type {};
 
-using id = entt::identifier<
+using id = entt::ident<
     a_type_still_valid,
-    ignore_type<a_type_no_longer_valid>,
+    ignore_type<no_longer_valid_type>,
     another_type_still_valid
 >;
 ```
@@ -827,8 +893,8 @@ Perhaps a bit ugly to see in a codebase but it gets the job done at least.
 
 ## Runtime generator
 
-To generate sequential numeric identifiers at runtime, `EnTT` offers the
-`family` class template:
+The `family` class template helps to generate sequential numeric identifiers for
+types at runtime:
 
 ```cpp
 // defines a custom generator
@@ -836,17 +902,17 @@ using id = entt::family<struct my_tag>;
 
 // ...
 
-const auto a_type_id = id::type<a_type>;
-const auto another_type_id = id::type<another_type>;
+const auto a_type_id = id::value<a_type>;
+const auto another_type_id = id::value<another_type>;
 ```
 
-This is all what a _family_ has to offer: a `type` inline variable that contains
-a numeric identifier for the given type.<br/>
+This is what a _family_ has to offer: a `value` inline variable that contains a
+numeric identifier for the given type.<br/>
 The generator is customizable, so as to get different _sequences_ for different
 purposes if needed.
 
-Please, note that identifiers aren't guaranteed to be stable across different
-runs. Indeed it mostly depends on the flow of execution.
+Identifiers aren't guaranteed to be stable across different runs. Indeed it
+mostly depends on the flow of execution.
 
 # Utilities
 
