@@ -20,6 +20,27 @@ struct nlohmann_json_like final {
     }
 };
 
+struct clazz {
+    char foo(int) {
+        return {};
+    }
+
+    int bar(double, float) const {
+        return {};
+    }
+
+    bool quux;
+};
+
+int free_function(int, const double &) {
+    return 42;
+}
+
+template<typename, typename Type = void>
+struct multi_argument_operation {
+    using type = Type;
+};
+
 TEST(SizeOf, Functionalities) {
     static_assert(entt::size_of_v<void> == 0u);
     static_assert(entt::size_of_v<char> == sizeof(char));
@@ -68,7 +89,7 @@ TEST(TypeList, Functionalities) {
     static_assert(std::is_same_v<entt::type_list_cat_t<type, other, type, other>, entt::type_list<int, char, double, int, char, double>>);
     static_assert(std::is_same_v<entt::type_list_cat_t<type, other>, entt::type_list<int, char, double>>);
     static_assert(std::is_same_v<entt::type_list_cat_t<type, type>, entt::type_list<int, char, int, char>>);
-    static_assert(std::is_same_v<entt::type_list_unique_t<entt::type_list_cat_t<type, type>>, entt::type_list<int, char>>);
+    static_assert(std::is_same_v<entt::type_list_unique_t<entt::type_list_cat_t<type, type>>, type>);
 
     static_assert(entt::type_list_contains_v<type, int>);
     static_assert(entt::type_list_contains_v<type, char>);
@@ -78,11 +99,27 @@ TEST(TypeList, Functionalities) {
     static_assert(std::is_same_v<entt::type_list_element_t<1u, type>, char>);
     static_assert(std::is_same_v<entt::type_list_element_t<0u, other>, double>);
 
+    static_assert(entt::type_list_index_v<int, type> == 0u);
+    static_assert(entt::type_list_index_v<char, type> == 1u);
+    static_assert(entt::type_list_index_v<double, other> == 0u);
+
     static_assert(std::is_same_v<entt::type_list_diff_t<entt::type_list<int, char, double>, entt::type_list<float, bool>>, entt::type_list<int, char, double>>);
     static_assert(std::is_same_v<entt::type_list_diff_t<entt::type_list<int, char, double>, entt::type_list<int, char, double>>, entt::type_list<>>);
     static_assert(std::is_same_v<entt::type_list_diff_t<entt::type_list<int, char, double>, entt::type_list<int, char>>, entt::type_list<double>>);
     static_assert(std::is_same_v<entt::type_list_diff_t<entt::type_list<int, char, double>, entt::type_list<char, double>>, entt::type_list<int>>);
     static_assert(std::is_same_v<entt::type_list_diff_t<entt::type_list<int, char, double>, entt::type_list<char>>, entt::type_list<int, double>>);
+
+    static_assert(std::is_same_v<entt::type_list_transform_t<entt::type_list<int, char>, entt::type_identity>, entt::type_list<int, char>>);
+    static_assert(std::is_same_v<entt::type_list_transform_t<entt::type_list<int, char>, std::add_const>, entt::type_list<const int, const char>>);
+    static_assert(std::is_same_v<entt::type_list_transform_t<entt::type_list<int, char>, multi_argument_operation>, entt::type_list<void, void>>);
+
+    static_assert(std::tuple_size_v<entt::type_list<>> == 0u);
+    static_assert(std::tuple_size_v<entt::type_list<int>> == 1u);
+    static_assert(std::tuple_size_v<entt::type_list<int, float>> == 2u);
+
+    static_assert(std::is_same_v<int, std::tuple_element_t<0, entt::type_list<int>>>);
+    static_assert(std::is_same_v<int, std::tuple_element_t<0, entt::type_list<int, float>>>);
+    static_assert(std::is_same_v<float, std::tuple_element_t<1, entt::type_list<int, float>>>);
 }
 
 TEST(ValueList, Functionalities) {
@@ -96,10 +133,33 @@ TEST(ValueList, Functionalities) {
     static_assert(std::is_same_v<entt::value_list_cat_t<value, other, value, other>, entt::value_list<0, 2, 1, 0, 2, 1>>);
     static_assert(std::is_same_v<entt::value_list_cat_t<value, other>, entt::value_list<0, 2, 1>>);
     static_assert(std::is_same_v<entt::value_list_cat_t<value, value>, entt::value_list<0, 2, 0, 2>>);
+    static_assert(std::is_same_v<entt::value_list_unique_t<entt::value_list_cat_t<value, value>>, value>);
+
+    static_assert(entt::value_list_contains_v<value, 0>);
+    static_assert(entt::value_list_contains_v<value, 2>);
+    static_assert(!entt::value_list_contains_v<value, 1>);
 
     static_assert(entt::value_list_element_v<0u, value> == 0);
     static_assert(entt::value_list_element_v<1u, value> == 2);
     static_assert(entt::value_list_element_v<0u, other> == 1);
+
+    static_assert(entt::value_list_index_v<0, value> == 0u);
+    static_assert(entt::value_list_index_v<2, value> == 1u);
+    static_assert(entt::value_list_index_v<1, other> == 0u);
+
+    static_assert(std::is_same_v<entt::value_list_diff_t<entt::value_list<0, 1, 2>, entt::value_list<3, 4>>, entt::value_list<0, 1, 2>>);
+    static_assert(std::is_same_v<entt::value_list_diff_t<entt::value_list<0, 1, 2>, entt::value_list<0, 1, 2>>, entt::value_list<>>);
+    static_assert(std::is_same_v<entt::value_list_diff_t<entt::value_list<0, 1, 2>, entt::value_list<0, 1>>, entt::value_list<2>>);
+    static_assert(std::is_same_v<entt::value_list_diff_t<entt::value_list<0, 1, 2>, entt::value_list<1, 2>>, entt::value_list<0>>);
+    static_assert(std::is_same_v<entt::value_list_diff_t<entt::value_list<0, 1, 2>, entt::value_list<1>>, entt::value_list<0, 2>>);
+
+    static_assert(std::tuple_size_v<entt::value_list<>> == 0u);
+    static_assert(std::tuple_size_v<entt::value_list<42>> == 1u);
+    static_assert(std::tuple_size_v<entt::value_list<42, 'a'>> == 2u);
+
+    static_assert(std::is_same_v<int, std::tuple_element_t<0, entt::value_list<42>>>);
+    static_assert(std::is_same_v<int, std::tuple_element_t<0, entt::value_list<42, 'a'>>>);
+    static_assert(std::is_same_v<char, std::tuple_element_t<1, entt::value_list<42, 'a'>>>);
 }
 
 TEST(IsApplicable, Functionalities) {
@@ -154,6 +214,7 @@ TEST(IsEqualityComparable, Functionalities) {
     static_assert(entt::is_equality_comparable_v<std::vector<not_comparable>::iterator>);
     static_assert(entt::is_equality_comparable_v<nlohmann_json_like>);
 
+    static_assert(!entt::is_equality_comparable_v<int[3u]>);
     static_assert(!entt::is_equality_comparable_v<not_comparable>);
     static_assert(!entt::is_equality_comparable_v<const not_comparable>);
     static_assert(!entt::is_equality_comparable_v<std::vector<not_comparable>>);
@@ -173,21 +234,19 @@ TEST(ConstnessAs, Functionalities) {
 }
 
 TEST(MemberClass, Functionalities) {
-    struct clazz {
-        char foo(int) {
-            return {};
-        }
-
-        int bar(double, float) const {
-            return {};
-        }
-
-        bool quux;
-    };
-
     static_assert(std::is_same_v<clazz, entt::member_class_t<decltype(&clazz::foo)>>);
     static_assert(std::is_same_v<clazz, entt::member_class_t<decltype(&clazz::bar)>>);
     static_assert(std::is_same_v<clazz, entt::member_class_t<decltype(&clazz::quux)>>);
+}
+
+TEST(NthArgument, Functionalities) {
+    static_assert(std::is_same_v<entt::nth_argument_t<0u, &free_function>, int>);
+    static_assert(std::is_same_v<entt::nth_argument_t<1u, &free_function>, const double &>);
+    static_assert(std::is_same_v<entt::nth_argument_t<0u, &clazz::bar>, double>);
+    static_assert(std::is_same_v<entt::nth_argument_t<1u, &clazz::bar>, float>);
+    static_assert(std::is_same_v<entt::nth_argument_t<0u, &clazz::quux>, bool>);
+
+    ASSERT_EQ(free_function(entt::nth_argument_t<0u, &free_function>{}, entt::nth_argument_t<1u, &free_function>{}), 42);
 }
 
 TEST(Tag, Functionalities) {

@@ -9,9 +9,14 @@
 #include <gtest/gtest.h>
 #include <entt/entity/component.hpp>
 #include <entt/entity/storage.hpp>
+#include "../common/config.h"
 #include "../common/throwing_allocator.hpp"
 #include "../common/throwing_type.hpp"
 #include "../common/tracked_memory_resource.hpp"
+
+struct pinned_type {
+    const int value{42};
+};
 
 struct empty_stable_type {
     static constexpr auto in_place_delete = true;
@@ -23,6 +28,15 @@ struct boxed_int {
 
 struct stable_type {
     static constexpr auto in_place_delete = true;
+    int value;
+};
+
+struct aggregate_tracking_type {
+    ~aggregate_tracking_type() {
+        ++counter;
+    }
+
+    static inline int counter;
     int value;
 };
 
@@ -40,11 +54,11 @@ struct update_from_destructor {
         : storage{&ref},
           target{other} {}
 
-    update_from_destructor(update_from_destructor &&other) ENTT_NOEXCEPT
+    update_from_destructor(update_from_destructor &&other) noexcept
         : storage{std::exchange(other.storage, nullptr)},
           target{std::exchange(other.target, entt::null)} {}
 
-    update_from_destructor &operator=(update_from_destructor &&other) ENTT_NOEXCEPT {
+    update_from_destructor &operator=(update_from_destructor &&other) noexcept {
         storage = std::exchange(other.storage, nullptr);
         target = std::exchange(other.target, entt::null);
         return *this;
@@ -69,31 +83,37 @@ struct create_from_constructor {
         }
     }
 
-    create_from_constructor(create_from_constructor &&other) ENTT_NOEXCEPT = default;
-    create_from_constructor &operator=(create_from_constructor &&other) ENTT_NOEXCEPT = default;
-
     entt::entity child;
 };
 
 template<>
 struct entt::component_traits<std::unordered_set<char>> {
     static constexpr auto in_place_delete = true;
-    static constexpr auto page_size = ENTT_PACKED_PAGE;
+    static constexpr auto page_size = 4u;
 };
 
-bool operator==(const boxed_int &lhs, const boxed_int &rhs) {
+inline bool operator==(const boxed_int &lhs, const boxed_int &rhs) {
     return lhs.value == rhs.value;
 }
 
-TEST(Storage, Functionalities) {
-    entt::storage<int> pool;
+struct Storage: ::testing::Test {
+    void SetUp() override {
+        aggregate_tracking_type::counter = 0;
+    }
+};
 
-    ASSERT_NO_THROW([[maybe_unused]] auto alloc = pool.get_allocator());
+using StorageDeathTest = Storage;
+
+TEST_F(Storage, Functionalities) {
+    entt::storage<int> pool;
+    constexpr auto page_size = decltype(pool)::traits_type::page_size;
+
+    ASSERT_NO_FATAL_FAILURE([[maybe_unused]] auto alloc = pool.get_allocator());
     ASSERT_EQ(pool.type(), entt::type_id<int>());
 
     pool.reserve(42);
 
-    ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), page_size);
     ASSERT_TRUE(pool.empty());
     ASSERT_EQ(pool.size(), 0u);
     ASSERT_EQ(std::as_const(pool).begin(), std::as_const(pool).end());
@@ -103,7 +123,7 @@ TEST(Storage, Functionalities) {
 
     pool.reserve(0);
 
-    ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), page_size);
     ASSERT_TRUE(pool.empty());
 
     pool.emplace(entt::entity{41}, 3);
@@ -145,14 +165,14 @@ TEST(Storage, Functionalities) {
     ASSERT_FALSE(pool.contains(entt::entity{0}));
     ASSERT_FALSE(pool.contains(entt::entity{41}));
 
-    ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), page_size);
 
     pool.shrink_to_fit();
 
     ASSERT_EQ(pool.capacity(), 0u);
 }
 
-TEST(Storage, Move) {
+TEST_F(Storage, Move) {
     entt::storage<int> pool;
     pool.emplace(entt::entity{3}, 3);
 
@@ -188,7 +208,7 @@ TEST(Storage, Move) {
     ASSERT_EQ(other.get(entt::entity{3}), 3);
 }
 
-TEST(Storage, Swap) {
+TEST_F(Storage, Swap) {
     entt::storage<int> pool;
     entt::storage<int> other;
 
@@ -216,7 +236,7 @@ TEST(Storage, Swap) {
     ASSERT_EQ(other.get(entt::entity{42}), 41);
 }
 
-TEST(Storage, StableSwap) {
+TEST_F(Storage, StableSwap) {
     entt::storage<stable_type> pool;
     entt::storage<stable_type> other;
 
@@ -244,11 +264,29 @@ TEST(Storage, StableSwap) {
     ASSERT_EQ(other.get(entt::entity{42}).value, 41);
 }
 
-TEST(Storage, EmptyType) {
+TEST_F(Storage, VoidType) {
+    entt::storage<void> pool;
+    pool.emplace(entt::entity{99});
+
+    ASSERT_EQ(pool.type(), entt::type_id<void>());
+    ASSERT_TRUE(pool.contains(entt::entity{99}));
+
+    entt::storage<void> other{std::move(pool)};
+
+    ASSERT_FALSE(pool.contains(entt::entity{99}));
+    ASSERT_TRUE(other.contains(entt::entity{99}));
+
+    pool = std::move(other);
+
+    ASSERT_TRUE(pool.contains(entt::entity{99}));
+    ASSERT_FALSE(other.contains(entt::entity{99}));
+}
+
+TEST_F(Storage, EmptyType) {
     entt::storage<empty_stable_type> pool;
     pool.emplace(entt::entity{99});
 
-    ASSERT_NO_THROW([[maybe_unused]] auto alloc = pool.get_allocator());
+    ASSERT_NO_FATAL_FAILURE([[maybe_unused]] auto alloc = pool.get_allocator());
     ASSERT_EQ(pool.type(), entt::type_id<empty_stable_type>());
     ASSERT_TRUE(pool.contains(entt::entity{99}));
 
@@ -261,12 +299,73 @@ TEST(Storage, EmptyType) {
 
     ASSERT_TRUE(pool.contains(entt::entity{99}));
     ASSERT_FALSE(other.contains(entt::entity{99}));
+
+    ASSERT_NO_THROW(pool.get(entt::entity{99}));
+    ASSERT_EQ(pool.get_as_tuple(entt::entity{99}), std::tuple<>{});
 }
 
-TEST(Storage, Insert) {
+ENTT_DEBUG_TEST_F(StorageDeathTest, EmptyType) {
+    entt::storage<empty_stable_type> pool;
+    pool.emplace(entt::entity{99});
+
+    ASSERT_DEATH(pool.get(entt::entity{3}), "");
+    ASSERT_DEATH([[maybe_unused]] auto tup = pool.get_as_tuple(entt::entity{3}), "");
+}
+
+TEST_F(Storage, Patch) {
+    entt::storage<int> pool;
+    entt::entity entity{42};
+    auto callback = [](int &value) { ++value; };
+
+    pool.emplace(entity, 0);
+
+    ASSERT_EQ(pool.get(entity), 0);
+
+    pool.patch(entity);
+    pool.patch(entity, callback);
+    pool.patch(entity, callback, callback);
+
+    ASSERT_EQ(pool.get(entity), 3);
+}
+
+ENTT_DEBUG_TEST_F(StorageDeathTest, Patch) {
+    entt::storage<int> pool;
+
+    ASSERT_DEATH(pool.patch(entt::null), "");
+}
+
+TEST_F(Storage, PatchEmptyType) {
+    entt::storage<empty_stable_type> pool;
+    entt::entity entity{42};
+
+    int counter = 0;
+    auto callback = [&counter]() { ++counter; };
+
+    pool.emplace(entity);
+
+    ASSERT_EQ(counter, 0);
+
+    pool.patch(entity);
+    pool.patch(entity, callback);
+    pool.patch(entity, callback, callback);
+
+    ASSERT_EQ(counter, 3);
+}
+
+ENTT_DEBUG_TEST_F(StorageDeathTest, PatchEmptyType) {
+    entt::storage<empty_stable_type> pool;
+
+    ASSERT_DEATH(pool.patch(entt::null), "");
+}
+
+TEST_F(Storage, Insert) {
     entt::storage<stable_type> pool;
     entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
-    pool.insert(std::begin(entities), std::end(entities), stable_type{99});
+    entt::storage<stable_type>::iterator it{};
+
+    it = pool.insert(std::begin(entities), std::end(entities), stable_type{99});
+
+    ASSERT_EQ(it, pool.cbegin());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_TRUE(pool.contains(entities[1u]));
@@ -275,10 +374,14 @@ TEST(Storage, Insert) {
     ASSERT_EQ(pool.size(), 2u);
     ASSERT_EQ(pool.get(entities[0u]).value, 99);
     ASSERT_EQ(pool.get(entities[1u]).value, 99);
+    ASSERT_EQ(it++->value, 99);
+    ASSERT_EQ(it->value, 99);
 
     pool.erase(std::begin(entities), std::end(entities));
     const stable_type values[2u] = {stable_type{42}, stable_type{3}};
-    pool.insert(std::rbegin(entities), std::rend(entities), std::begin(values));
+    it = pool.insert(std::rbegin(entities), std::rend(entities), std::begin(values));
+
+    ASSERT_EQ(it, pool.cbegin());
 
     ASSERT_EQ(pool.size(), 4u);
     ASSERT_EQ(pool.at(2u), entities[1u]);
@@ -287,9 +390,11 @@ TEST(Storage, Insert) {
     ASSERT_EQ(pool.index(entities[1u]), 2u);
     ASSERT_EQ(pool.get(entities[0u]).value, 3);
     ASSERT_EQ(pool.get(entities[1u]).value, 42);
+    ASSERT_EQ(it++->value, 3);
+    ASSERT_EQ(it->value, 42);
 }
 
-TEST(Storage, InsertEmptyType) {
+TEST_F(Storage, InsertEmptyType) {
     entt::storage<empty_stable_type> pool;
     entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
 
@@ -312,7 +417,7 @@ TEST(Storage, InsertEmptyType) {
     ASSERT_EQ(pool.index(entities[1u]), 2u);
 }
 
-TEST(Storage, Erase) {
+TEST_F(Storage, Erase) {
     entt::storage<int> pool;
     entt::entity entities[3u]{entt::entity{3}, entt::entity{42}, entt::entity{9}};
 
@@ -345,7 +450,22 @@ TEST(Storage, Erase) {
     ASSERT_EQ(*pool.begin(), 1);
 }
 
-TEST(Storage, StableErase) {
+TEST_F(Storage, CrossErase) {
+    entt::sparse_set set;
+    entt::storage<int> pool;
+    entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
+
+    pool.emplace(entities[0u], 3);
+    pool.emplace(entities[1u], 42);
+    set.push(entities[1u]);
+    pool.erase(set.begin(), set.end());
+
+    ASSERT_TRUE(pool.contains(entities[0u]));
+    ASSERT_FALSE(pool.contains(entities[1u]));
+    ASSERT_EQ(pool.raw()[0u][0u], 3);
+}
+
+TEST_F(Storage, StableErase) {
     entt::storage<stable_type> pool;
     entt::entity entities[3u]{entt::entity{3}, entt::entity{42}, entt::entity{9}};
 
@@ -439,7 +559,22 @@ TEST(Storage, StableErase) {
     ASSERT_EQ(pool.get(entities[2u]).value, 1);
 }
 
-TEST(Storage, Remove) {
+TEST_F(Storage, CrossStableErase) {
+    entt::sparse_set set;
+    entt::storage<stable_type> pool;
+    entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
+
+    pool.emplace(entities[0u], 3);
+    pool.emplace(entities[1u], 42);
+    set.push(entities[1u]);
+    pool.erase(set.begin(), set.end());
+
+    ASSERT_TRUE(pool.contains(entities[0u]));
+    ASSERT_FALSE(pool.contains(entities[1u]));
+    ASSERT_EQ(pool.raw()[0u][0u].value, 3);
+}
+
+TEST_F(Storage, Remove) {
     entt::storage<int> pool;
     entt::entity entities[3u]{entt::entity{3}, entt::entity{42}, entt::entity{9}};
 
@@ -459,8 +594,8 @@ TEST(Storage, Remove) {
     ASSERT_FALSE(pool.empty());
     ASSERT_EQ(*pool.begin(), 2);
 
-    ASSERT_EQ(pool.remove(entities[2u]), 1u);
-    ASSERT_EQ(pool.remove(entities[2u]), 0u);
+    ASSERT_TRUE(pool.remove(entities[2u]));
+    ASSERT_FALSE(pool.remove(entities[2u]));
     ASSERT_TRUE(pool.empty());
 
     pool.emplace(entities[0u], 0);
@@ -473,7 +608,22 @@ TEST(Storage, Remove) {
     ASSERT_EQ(*pool.begin(), 1);
 }
 
-TEST(Storage, StableRemove) {
+TEST_F(Storage, CrossRemove) {
+    entt::sparse_set set;
+    entt::storage<int> pool;
+    entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
+
+    pool.emplace(entities[0u], 3);
+    pool.emplace(entities[1u], 42);
+    set.push(entities[1u]);
+    pool.remove(set.begin(), set.end());
+
+    ASSERT_TRUE(pool.contains(entities[0u]));
+    ASSERT_FALSE(pool.contains(entities[1u]));
+    ASSERT_EQ(pool.raw()[0u][0u], 3);
+}
+
+TEST_F(Storage, StableRemove) {
     entt::storage<stable_type> pool;
     entt::entity entities[3u]{entt::entity{3}, entt::entity{42}, entt::entity{9}};
 
@@ -506,9 +656,9 @@ TEST(Storage, StableRemove) {
     ASSERT_EQ(pool.begin()->value, 2);
     ASSERT_EQ(pool.index(entities[2u]), 2u);
 
-    ASSERT_EQ(pool.remove(entities[2u]), 1u);
-    ASSERT_EQ(pool.remove(entities[2u]), 0u);
-    ASSERT_EQ(pool.remove(entities[2u]), 0u);
+    ASSERT_TRUE(pool.remove(entities[2u]));
+    ASSERT_FALSE(pool.remove(entities[2u]));
+    ASSERT_FALSE(pool.remove(entities[2u]));
     ASSERT_FALSE(pool.empty());
     ASSERT_EQ(pool.size(), 3u);
     ASSERT_FALSE(pool.contains(entities[0u]));
@@ -541,11 +691,11 @@ TEST(Storage, StableRemove) {
     pool.emplace(entities[1u], stable_type{2});
     pool.emplace(entities[2u], stable_type{1});
 
-    ASSERT_EQ(pool.remove(entities[2u]), 1u);
-    ASSERT_EQ(pool.remove(entities[2u]), 0u);
+    ASSERT_TRUE(pool.remove(entities[2u]));
+    ASSERT_FALSE(pool.remove(entities[2u]));
 
-    ASSERT_EQ(pool.remove(entities[0u]), 1u);
-    ASSERT_EQ(pool.remove(entities[1u]), 1u);
+    ASSERT_TRUE(pool.remove(entities[0u]));
+    ASSERT_TRUE(pool.remove(entities[1u]));
     ASSERT_EQ(pool.remove(entities, entities + 2u), 0u);
 
     ASSERT_EQ(pool.size(), 3u);
@@ -570,7 +720,22 @@ TEST(Storage, StableRemove) {
     ASSERT_EQ(pool.get(entities[2u]).value, 1);
 }
 
-TEST(Storage, TypeFromBase) {
+TEST_F(Storage, CrossStableRemove) {
+    entt::sparse_set set;
+    entt::storage<stable_type> pool;
+    entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
+
+    pool.emplace(entities[0u], 3);
+    pool.emplace(entities[1u], 42);
+    set.push(entities[1u]);
+    pool.remove(set.begin(), set.end());
+
+    ASSERT_TRUE(pool.contains(entities[0u]));
+    ASSERT_FALSE(pool.contains(entities[1u]));
+    ASSERT_EQ(pool.raw()[0u][0u].value, 3);
+}
+
+TEST_F(Storage, TypeFromBase) {
     entt::storage<int> pool;
     entt::sparse_set &base = pool;
     entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
@@ -583,16 +748,16 @@ TEST(Storage, TypeFromBase) {
 
     int instance = 42;
 
-    ASSERT_NE(base.emplace(entities[0u], &instance), base.end());
+    ASSERT_NE(base.push(entities[0u], &instance), base.end());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
-    ASSERT_EQ(base.get(entities[0u]), &pool.get(entities[0u]));
+    ASSERT_EQ(base.value(entities[0u]), &pool.get(entities[0u]));
     ASSERT_EQ(pool.get(entities[0u]), 42);
 
     base.erase(entities[0u]);
 
-    ASSERT_NE(base.insert(std::begin(entities), std::end(entities)), base.end());
+    ASSERT_NE(base.push(std::begin(entities), std::end(entities)), base.end());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_TRUE(pool.contains(entities[1u]));
@@ -604,7 +769,7 @@ TEST(Storage, TypeFromBase) {
     ASSERT_TRUE(pool.empty());
 }
 
-TEST(Storage, EmptyTypeFromBase) {
+TEST_F(Storage, EmptyTypeFromBase) {
     entt::storage<empty_stable_type> pool;
     entt::sparse_set &base = pool;
     entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
@@ -617,17 +782,17 @@ TEST(Storage, EmptyTypeFromBase) {
 
     empty_stable_type instance{};
 
-    ASSERT_NE(base.emplace(entities[0u], &instance), base.end());
+    ASSERT_NE(base.push(entities[0u], &instance), base.end());
 
     ASSERT_EQ(pool.size(), 1u);
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
-    ASSERT_EQ(base.get(entities[0u]), nullptr);
+    ASSERT_EQ(base.value(entities[0u]), nullptr);
     ASSERT_EQ(base.index(entities[0u]), 0u);
 
     base.erase(entities[0u]);
 
-    ASSERT_NE(base.insert(std::begin(entities), std::end(entities)), base.end());
+    ASSERT_NE(base.push(std::begin(entities), std::end(entities)), base.end());
 
     ASSERT_EQ(pool.size(), 3u);
     ASSERT_TRUE(pool.contains(entities[0u]));
@@ -637,7 +802,7 @@ TEST(Storage, EmptyTypeFromBase) {
 
     base.erase(std::begin(entities), std::end(entities));
 
-    ASSERT_NE(base.insert(std::rbegin(entities), std::rend(entities)), base.end());
+    ASSERT_NE(base.push(std::rbegin(entities), std::rend(entities)), base.end());
 
     ASSERT_EQ(pool.size(), 5u);
     ASSERT_TRUE(pool.contains(entities[0u]));
@@ -655,7 +820,7 @@ TEST(Storage, EmptyTypeFromBase) {
     }
 }
 
-TEST(Storage, NonDefaultConstructibleTypeFromBase) {
+TEST_F(Storage, NonDefaultConstructibleTypeFromBase) {
     entt::storage<non_default_constructible> pool;
     entt::sparse_set &base = pool;
     entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
@@ -666,7 +831,7 @@ TEST(Storage, NonDefaultConstructibleTypeFromBase) {
     ASSERT_FALSE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
 
-    ASSERT_EQ(base.emplace(entities[0u]), base.end());
+    ASSERT_EQ(base.push(entities[0u]), base.end());
 
     ASSERT_FALSE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
@@ -675,7 +840,7 @@ TEST(Storage, NonDefaultConstructibleTypeFromBase) {
 
     non_default_constructible instance{3};
 
-    ASSERT_NE(base.emplace(entities[0u], &instance), base.end());
+    ASSERT_NE(base.push(entities[0u], &instance), base.end());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
@@ -685,7 +850,7 @@ TEST(Storage, NonDefaultConstructibleTypeFromBase) {
     ASSERT_TRUE(pool.empty());
     ASSERT_FALSE(pool.contains(entities[0u]));
 
-    ASSERT_EQ(base.insert(std::begin(entities), std::end(entities)), base.end());
+    ASSERT_EQ(base.push(std::begin(entities), std::end(entities)), base.end());
 
     ASSERT_FALSE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
@@ -694,7 +859,7 @@ TEST(Storage, NonDefaultConstructibleTypeFromBase) {
     ASSERT_TRUE(pool.empty());
 }
 
-TEST(Storage, NonCopyConstructibleTypeFromBase) {
+TEST_F(Storage, NonCopyConstructibleTypeFromBase) {
     entt::storage<std::unique_ptr<int>> pool;
     entt::sparse_set &base = pool;
     entt::entity entities[2u]{entt::entity{3}, entt::entity{42}};
@@ -705,7 +870,7 @@ TEST(Storage, NonCopyConstructibleTypeFromBase) {
     ASSERT_FALSE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
 
-    ASSERT_NE(base.emplace(entities[0u]), base.end());
+    ASSERT_NE(base.push(entities[0u]), base.end());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
@@ -714,7 +879,7 @@ TEST(Storage, NonCopyConstructibleTypeFromBase) {
 
     std::unique_ptr<int> instance = std::make_unique<int>(3);
 
-    ASSERT_EQ(base.emplace(entities[1u], &instance), base.end());
+    ASSERT_EQ(base.push(entities[1u], &instance), base.end());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_FALSE(pool.contains(entities[1u]));
@@ -724,7 +889,7 @@ TEST(Storage, NonCopyConstructibleTypeFromBase) {
     ASSERT_TRUE(pool.empty());
     ASSERT_FALSE(pool.contains(entities[0u]));
 
-    ASSERT_NE(base.insert(std::begin(entities), std::end(entities)), base.end());
+    ASSERT_NE(base.push(std::begin(entities), std::end(entities)), base.end());
 
     ASSERT_TRUE(pool.contains(entities[0u]));
     ASSERT_TRUE(pool.contains(entities[1u]));
@@ -733,7 +898,7 @@ TEST(Storage, NonCopyConstructibleTypeFromBase) {
     ASSERT_FALSE(pool.empty());
 }
 
-TEST(Storage, Compact) {
+TEST_F(Storage, Compact) {
     entt::storage<stable_type> pool;
 
     ASSERT_TRUE(pool.empty());
@@ -779,27 +944,28 @@ TEST(Storage, Compact) {
     ASSERT_TRUE(pool.empty());
 }
 
-TEST(Storage, ShrinkToFit) {
+TEST_F(Storage, ShrinkToFit) {
     entt::storage<int> pool;
+    constexpr auto page_size = decltype(pool)::traits_type::page_size;
 
-    for(std::size_t next{}; next < ENTT_PACKED_PAGE; ++next) {
+    for(std::size_t next{}; next < page_size; ++next) {
         pool.emplace(entt::entity(next));
     }
 
-    pool.emplace(entt::entity{ENTT_PACKED_PAGE});
-    pool.erase(entt::entity{ENTT_PACKED_PAGE});
+    pool.emplace(entt::entity{page_size});
+    pool.erase(entt::entity{page_size});
 
-    ASSERT_EQ(pool.capacity(), 2 * ENTT_PACKED_PAGE);
-    ASSERT_EQ(pool.size(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), 2 * page_size);
+    ASSERT_EQ(pool.size(), page_size);
 
     pool.shrink_to_fit();
 
-    ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
-    ASSERT_EQ(pool.size(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), page_size);
+    ASSERT_EQ(pool.size(), page_size);
 
     pool.clear();
 
-    ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), page_size);
     ASSERT_EQ(pool.size(), 0u);
 
     pool.shrink_to_fit();
@@ -808,16 +974,22 @@ TEST(Storage, ShrinkToFit) {
     ASSERT_EQ(pool.size(), 0u);
 }
 
-TEST(Storage, AggregatesMustWork) {
-    struct aggregate_type {
-        int value;
-    };
+TEST_F(Storage, AggregatesMustWork) {
+    static_assert(std::is_aggregate_v<aggregate_tracking_type>);
+    entt::storage<aggregate_tracking_type> storage{};
 
-    // the goal of this test is to enforce the requirements for aggregate types
-    entt::storage<aggregate_type>{}.emplace(entt::entity{0}, 42);
+    // aggregate types with no args enter the non-aggregate path
+    storage.emplace(entt::entity{0});
+
+    ASSERT_EQ(aggregate_tracking_type::counter, 0);
+
+    // aggregate types with args work despite the lack of support in the standard library
+    storage.emplace(entt::entity{1}, 42);
+
+    ASSERT_EQ(aggregate_tracking_type::counter, 1);
 }
 
-TEST(Storage, SelfMoveSupport) {
+TEST_F(Storage, SelfMoveSupport) {
     // see #37 - this test shouldn't crash, that's all
     entt::storage<std::unordered_set<int>> pool;
     entt::entity entity{};
@@ -830,7 +1002,7 @@ TEST(Storage, SelfMoveSupport) {
     ASSERT_FALSE(pool.contains(entity));
 }
 
-TEST(Storage, SelfMoveSupportInPlaceDelete) {
+TEST_F(Storage, SelfMoveSupportInPlaceDelete) {
     // see #37 - this test shouldn't crash, that's all
     entt::storage<std::unordered_set<char>> pool;
     entt::entity entity{};
@@ -843,7 +1015,7 @@ TEST(Storage, SelfMoveSupportInPlaceDelete) {
     ASSERT_FALSE(pool.contains(entity));
 }
 
-TEST(Storage, Iterator) {
+TEST_F(Storage, Iterator) {
     using iterator = typename entt::storage<boxed_int>::iterator;
 
     static_assert(std::is_same_v<iterator::value_type, boxed_int>);
@@ -904,7 +1076,7 @@ TEST(Storage, Iterator) {
     ASSERT_EQ(begin[1u], boxed_int{42});
 }
 
-TEST(Storage, ConstIterator) {
+TEST_F(Storage, ConstIterator) {
     using iterator = typename entt::storage<boxed_int>::const_iterator;
 
     static_assert(std::is_same_v<iterator::value_type, boxed_int>);
@@ -967,7 +1139,7 @@ TEST(Storage, ConstIterator) {
     ASSERT_EQ(cbegin[1u], boxed_int{42});
 }
 
-TEST(Storage, ReverseIterator) {
+TEST_F(Storage, ReverseIterator) {
     using reverse_iterator = typename entt::storage<boxed_int>::reverse_iterator;
 
     static_assert(std::is_same_v<reverse_iterator::value_type, boxed_int>);
@@ -1028,7 +1200,7 @@ TEST(Storage, ReverseIterator) {
     ASSERT_EQ(begin[1u], boxed_int{3});
 }
 
-TEST(Storage, ConstReverseIterator) {
+TEST_F(Storage, ConstReverseIterator) {
     using const_reverse_iterator = typename entt::storage<boxed_int>::const_reverse_iterator;
 
     static_assert(std::is_same_v<const_reverse_iterator::value_type, boxed_int>);
@@ -1091,7 +1263,7 @@ TEST(Storage, ConstReverseIterator) {
     ASSERT_EQ(cbegin[1u], boxed_int{3});
 }
 
-TEST(Storage, IteratorConversion) {
+TEST_F(Storage, IteratorConversion) {
     entt::storage<boxed_int> pool;
     pool.emplace(entt::entity{3}, 42);
 
@@ -1114,15 +1286,31 @@ TEST(Storage, IteratorConversion) {
     ASSERT_NE(++cit, it);
 }
 
-TEST(Storage, Iterable) {
+TEST_F(Storage, IteratorPageSizeAwareness) {
+    entt::storage<std::unordered_set<char>> pool;
+    constexpr auto page_size = decltype(pool)::traits_type::page_size;
+    const std::unordered_set<char> check{'c'};
+
+    for(unsigned int next{}; next < page_size; ++next) {
+        pool.emplace(entt::entity{next});
+    }
+
+    pool.emplace(entt::entity{page_size}, check);
+
+    // test the proper use of component traits by the storage iterator
+    ASSERT_EQ(*pool.begin(), check);
+}
+
+TEST_F(Storage, Iterable) {
     using iterator = typename entt::storage<boxed_int>::iterable::iterator;
 
-    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity, boxed_int &>>);
     static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity, boxed_int &>>);
     static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity, boxed_int &>>>);
     static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
 
     entt::storage<boxed_int> pool;
+    entt::sparse_set &base = pool;
+
     pool.emplace(entt::entity{1}, 99);
     pool.emplace(entt::entity{3}, 42);
     auto iterable = pool.each();
@@ -1136,13 +1324,18 @@ TEST(Storage, Iterable) {
     ASSERT_EQ(end, iterable.end());
     ASSERT_NE(begin, end);
 
+    ASSERT_EQ(begin.base(), base.begin());
+    ASSERT_EQ(end.base(), base.end());
+
     ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{3});
     ASSERT_EQ(std::get<1>(*begin.operator->().operator->()), boxed_int{42});
     ASSERT_EQ(std::get<0>(*begin), entt::entity{3});
     ASSERT_EQ(std::get<1>(*begin), boxed_int{42});
 
     ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.begin());
     ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.end());
 
     for(auto [entity, element]: iterable) {
         static_assert(std::is_same_v<decltype(entity), entt::entity>);
@@ -1152,15 +1345,16 @@ TEST(Storage, Iterable) {
     }
 }
 
-TEST(Storage, ConstIterable) {
+TEST_F(Storage, ConstIterable) {
     using iterator = typename entt::storage<boxed_int>::const_iterable::iterator;
 
-    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity, const boxed_int &>>);
     static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity, const boxed_int &>>);
     static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity, const boxed_int &>>>);
     static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
 
     entt::storage<boxed_int> pool;
+    entt::sparse_set &base = pool;
+
     pool.emplace(entt::entity{1}, 99);
     pool.emplace(entt::entity{3}, 42);
     auto iterable = std::as_const(pool).each();
@@ -1174,13 +1368,18 @@ TEST(Storage, ConstIterable) {
     ASSERT_EQ(end, iterable.cend());
     ASSERT_NE(begin, end);
 
+    ASSERT_EQ(begin.base(), base.begin());
+    ASSERT_EQ(end.base(), base.end());
+
     ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{3});
     ASSERT_EQ(std::get<1>(*begin.operator->().operator->()), boxed_int{42});
     ASSERT_EQ(std::get<0>(*begin), entt::entity{3});
     ASSERT_EQ(std::get<1>(*begin), boxed_int{42});
 
-    ASSERT_EQ(begin++, iterable.cbegin());
-    ASSERT_EQ(++begin, iterable.cend());
+    ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.begin());
+    ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.end());
 
     for(auto [entity, element]: iterable) {
         static_assert(std::is_same_v<decltype(entity), entt::entity>);
@@ -1190,7 +1389,7 @@ TEST(Storage, ConstIterable) {
     }
 }
 
-TEST(Storage, IterableIteratorConversion) {
+TEST_F(Storage, IterableIteratorConversion) {
     entt::storage<boxed_int> pool;
     pool.emplace(entt::entity{3}, 42);
 
@@ -1204,7 +1403,7 @@ TEST(Storage, IterableIteratorConversion) {
     ASSERT_NE(++cit, it);
 }
 
-TEST(Storage, EmptyTypeIterable) {
+TEST_F(Storage, EmptyTypeIterable) {
     using iterator = typename entt::storage<empty_stable_type>::iterable::iterator;
 
     static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
@@ -1213,6 +1412,8 @@ TEST(Storage, EmptyTypeIterable) {
     static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
 
     entt::storage<empty_stable_type> pool;
+    entt::sparse_set &base = pool;
+
     pool.emplace(entt::entity{1});
     pool.emplace(entt::entity{3});
     auto iterable = pool.each();
@@ -1226,11 +1427,16 @@ TEST(Storage, EmptyTypeIterable) {
     ASSERT_EQ(end, iterable.end());
     ASSERT_NE(begin, end);
 
+    ASSERT_EQ(begin.base(), base.begin());
+    ASSERT_EQ(end.base(), base.end());
+
     ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{3});
     ASSERT_EQ(std::get<0>(*begin), entt::entity{3});
 
     ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.begin());
     ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.end());
 
     for(auto [entity]: iterable) {
         static_assert(std::is_same_v<decltype(entity), entt::entity>);
@@ -1238,7 +1444,48 @@ TEST(Storage, EmptyTypeIterable) {
     }
 }
 
-TEST(Storage, IterableAlgorithmCompatibility) {
+TEST_F(Storage, EmptyTypeConstIterable) {
+    using iterator = typename entt::storage<empty_stable_type>::const_iterable::iterator;
+
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
+    static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity>>>);
+    static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
+
+    entt::storage<empty_stable_type> pool;
+    entt::sparse_set &base = pool;
+
+    pool.emplace(entt::entity{1});
+    pool.emplace(entt::entity{3});
+    auto iterable = std::as_const(pool).each();
+
+    iterator end{iterable.begin()};
+    iterator begin{};
+    begin = iterable.end();
+    std::swap(begin, end);
+
+    ASSERT_EQ(begin, iterable.begin());
+    ASSERT_EQ(end, iterable.end());
+    ASSERT_NE(begin, end);
+
+    ASSERT_EQ(begin.base(), base.begin());
+    ASSERT_EQ(end.base(), base.end());
+
+    ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{3});
+    ASSERT_EQ(std::get<0>(*begin), entt::entity{3});
+
+    ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.begin());
+    ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.end());
+
+    for(auto [entity]: iterable) {
+        static_assert(std::is_same_v<decltype(entity), entt::entity>);
+        ASSERT_TRUE(entity == entt::entity{1} || entity == entt::entity{3});
+    }
+}
+
+TEST_F(Storage, IterableAlgorithmCompatibility) {
     entt::storage<boxed_int> pool;
     pool.emplace(entt::entity{3}, 42);
 
@@ -1248,7 +1495,201 @@ TEST(Storage, IterableAlgorithmCompatibility) {
     ASSERT_EQ(std::get<0>(*it), entt::entity{3});
 }
 
-TEST(Storage, Raw) {
+TEST_F(Storage, ReverseIterable) {
+    using iterator = typename entt::storage<boxed_int>::reverse_iterable::iterator;
+
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity, boxed_int &>>);
+    static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity, boxed_int &>>>);
+    static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
+
+    entt::storage<boxed_int> pool;
+    entt::sparse_set &base = pool;
+
+    pool.emplace(entt::entity{1}, 99);
+    pool.emplace(entt::entity{3}, 42);
+    auto iterable = pool.reach();
+
+    iterator end{iterable.begin()};
+    iterator begin{};
+    begin = iterable.end();
+    std::swap(begin, end);
+
+    ASSERT_EQ(begin, iterable.begin());
+    ASSERT_EQ(end, iterable.end());
+    ASSERT_NE(begin, end);
+
+    ASSERT_EQ(begin.base(), base.rbegin());
+    ASSERT_EQ(end.base(), base.rend());
+
+    ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{1});
+    ASSERT_EQ(std::get<1>(*begin.operator->().operator->()), boxed_int{99});
+    ASSERT_EQ(std::get<0>(*begin), entt::entity{1});
+    ASSERT_EQ(std::get<1>(*begin), boxed_int{99});
+
+    ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.rbegin());
+    ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.rend());
+
+    for(auto [entity, element]: iterable) {
+        static_assert(std::is_same_v<decltype(entity), entt::entity>);
+        static_assert(std::is_same_v<decltype(element), boxed_int &>);
+        ASSERT_TRUE(entity != entt::entity{1} || element == boxed_int{99});
+        ASSERT_TRUE(entity != entt::entity{3} || element == boxed_int{42});
+    }
+}
+
+TEST_F(Storage, ConstReverseIterable) {
+    using iterator = typename entt::storage<boxed_int>::const_reverse_iterable::iterator;
+
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity, const boxed_int &>>);
+    static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity, const boxed_int &>>>);
+    static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
+
+    entt::storage<boxed_int> pool;
+    entt::sparse_set &base = pool;
+
+    pool.emplace(entt::entity{1}, 99);
+    pool.emplace(entt::entity{3}, 42);
+    auto iterable = std::as_const(pool).reach();
+
+    iterator end{iterable.cbegin()};
+    iterator begin{};
+    begin = iterable.cend();
+    std::swap(begin, end);
+
+    ASSERT_EQ(begin, iterable.cbegin());
+    ASSERT_EQ(end, iterable.cend());
+    ASSERT_NE(begin, end);
+
+    ASSERT_EQ(begin.base(), base.rbegin());
+    ASSERT_EQ(end.base(), base.rend());
+
+    ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{1});
+    ASSERT_EQ(std::get<1>(*begin.operator->().operator->()), boxed_int{99});
+    ASSERT_EQ(std::get<0>(*begin), entt::entity{1});
+    ASSERT_EQ(std::get<1>(*begin), boxed_int{99});
+
+    ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.rbegin());
+    ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.rend());
+
+    for(auto [entity, element]: iterable) {
+        static_assert(std::is_same_v<decltype(entity), entt::entity>);
+        static_assert(std::is_same_v<decltype(element), const boxed_int &>);
+        ASSERT_TRUE(entity != entt::entity{1} || element == boxed_int{99});
+        ASSERT_TRUE(entity != entt::entity{3} || element == boxed_int{42});
+    }
+}
+
+TEST_F(Storage, ReverseIterableIteratorConversion) {
+    entt::storage<boxed_int> pool;
+    pool.emplace(entt::entity{3}, 42);
+
+    typename entt::storage<boxed_int>::reverse_iterable::iterator it = pool.reach().begin();
+    typename entt::storage<boxed_int>::const_reverse_iterable::iterator cit = it;
+
+    static_assert(std::is_same_v<decltype(*it), std::tuple<entt::entity, boxed_int &>>);
+    static_assert(std::is_same_v<decltype(*cit), std::tuple<entt::entity, const boxed_int &>>);
+
+    ASSERT_EQ(it, cit);
+    ASSERT_NE(++cit, it);
+}
+
+TEST_F(Storage, EmptyTypeReverseIterable) {
+    using iterator = typename entt::storage<empty_stable_type>::reverse_iterable::iterator;
+
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
+    static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity>>>);
+    static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
+
+    entt::storage<empty_stable_type> pool;
+    entt::sparse_set &base = pool;
+
+    pool.emplace(entt::entity{1});
+    pool.emplace(entt::entity{3});
+    auto iterable = pool.reach();
+
+    iterator end{iterable.begin()};
+    iterator begin{};
+    begin = iterable.end();
+    std::swap(begin, end);
+
+    ASSERT_EQ(begin, iterable.begin());
+    ASSERT_EQ(end, iterable.end());
+    ASSERT_NE(begin, end);
+
+    ASSERT_EQ(begin.base(), base.rbegin());
+    ASSERT_EQ(end.base(), base.rend());
+
+    ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{1});
+    ASSERT_EQ(std::get<0>(*begin), entt::entity{1});
+
+    ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.rbegin());
+    ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.rend());
+
+    for(auto [entity]: iterable) {
+        static_assert(std::is_same_v<decltype(entity), entt::entity>);
+        ASSERT_TRUE(entity == entt::entity{1} || entity == entt::entity{3});
+    }
+}
+
+TEST_F(Storage, EmptyTypeConstReverseIterable) {
+    using iterator = typename entt::storage<empty_stable_type>::const_reverse_iterable::iterator;
+
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
+    static_assert(std::is_same_v<iterator::value_type, std::tuple<entt::entity>>);
+    static_assert(std::is_same_v<typename iterator::pointer, entt::input_iterator_pointer<std::tuple<entt::entity>>>);
+    static_assert(std::is_same_v<typename iterator::reference, typename iterator::value_type>);
+
+    entt::storage<empty_stable_type> pool;
+    entt::sparse_set &base = pool;
+
+    pool.emplace(entt::entity{1});
+    pool.emplace(entt::entity{3});
+    auto iterable = std::as_const(pool).reach();
+
+    iterator end{iterable.begin()};
+    iterator begin{};
+    begin = iterable.end();
+    std::swap(begin, end);
+
+    ASSERT_EQ(begin, iterable.begin());
+    ASSERT_EQ(end, iterable.end());
+    ASSERT_NE(begin, end);
+
+    ASSERT_EQ(begin.base(), base.rbegin());
+    ASSERT_EQ(end.base(), base.rend());
+
+    ASSERT_EQ(std::get<0>(*begin.operator->().operator->()), entt::entity{1});
+    ASSERT_EQ(std::get<0>(*begin), entt::entity{1});
+
+    ASSERT_EQ(begin++, iterable.begin());
+    ASSERT_EQ(begin.base(), ++base.rbegin());
+    ASSERT_EQ(++begin, iterable.end());
+    ASSERT_EQ(begin.base(), base.rend());
+
+    for(auto [entity]: iterable) {
+        static_assert(std::is_same_v<decltype(entity), entt::entity>);
+        ASSERT_TRUE(entity == entt::entity{1} || entity == entt::entity{3});
+    }
+}
+
+TEST_F(Storage, ReverseIterableAlgorithmCompatibility) {
+    entt::storage<boxed_int> pool;
+    pool.emplace(entt::entity{3}, 42);
+
+    const auto iterable = pool.reach();
+    const auto it = std::find_if(iterable.begin(), iterable.end(), [](auto args) { return std::get<0>(args) == entt::entity{3}; });
+
+    ASSERT_EQ(std::get<0>(*it), entt::entity{3});
+}
+
+TEST_F(Storage, Raw) {
     entt::storage<int> pool;
 
     pool.emplace(entt::entity{3}, 3);
@@ -1264,7 +1705,51 @@ TEST(Storage, Raw) {
     ASSERT_EQ(pool.raw()[0u][2u], 9);
 }
 
-TEST(Storage, SortOrdered) {
+TEST_F(Storage, SwapElements) {
+    entt::storage<int> pool;
+
+    pool.emplace(entt::entity{3}, 3);
+    pool.emplace(entt::entity{12}, 6);
+    pool.emplace(entt::entity{42}, 9);
+
+    pool.erase(entt::entity{12});
+
+    ASSERT_EQ(pool.get(entt::entity{3}), 3);
+    ASSERT_EQ(pool.get(entt::entity{42}), 9);
+    ASSERT_EQ(pool.index(entt::entity{3}), 0u);
+    ASSERT_EQ(pool.index(entt::entity{42}), 1u);
+
+    pool.swap_elements(entt::entity{3}, entt::entity{42});
+
+    ASSERT_EQ(pool.get(entt::entity{3}), 3);
+    ASSERT_EQ(pool.get(entt::entity{42}), 9);
+    ASSERT_EQ(pool.index(entt::entity{3}), 1u);
+    ASSERT_EQ(pool.index(entt::entity{42}), 0u);
+}
+
+TEST_F(Storage, StableSwapElements) {
+    entt::storage<stable_type> pool;
+
+    pool.emplace(entt::entity{3}, 3);
+    pool.emplace(entt::entity{12}, 6);
+    pool.emplace(entt::entity{42}, 9);
+
+    pool.erase(entt::entity{12});
+
+    ASSERT_EQ(pool.get(entt::entity{3}).value, 3);
+    ASSERT_EQ(pool.get(entt::entity{42}).value, 9);
+    ASSERT_EQ(pool.index(entt::entity{3}), 0u);
+    ASSERT_EQ(pool.index(entt::entity{42}), 2u);
+
+    pool.swap_elements(entt::entity{3}, entt::entity{42});
+
+    ASSERT_EQ(pool.get(entt::entity{3}).value, 3);
+    ASSERT_EQ(pool.get(entt::entity{42}).value, 9);
+    ASSERT_EQ(pool.index(entt::entity{3}), 2u);
+    ASSERT_EQ(pool.index(entt::entity{42}), 0u);
+}
+
+TEST_F(Storage, SortOrdered) {
     entt::storage<boxed_int> pool;
     entt::entity entities[5u]{entt::entity{12}, entt::entity{42}, entt::entity{7}, entt::entity{3}, entt::entity{9}};
     boxed_int values[5u]{{12}, {9}, {6}, {3}, {1}};
@@ -1276,7 +1761,7 @@ TEST(Storage, SortOrdered) {
     ASSERT_TRUE(std::equal(std::rbegin(values), std::rend(values), pool.begin(), pool.end()));
 }
 
-TEST(Storage, SortReverse) {
+TEST_F(Storage, SortReverse) {
     entt::storage<boxed_int> pool;
     entt::entity entities[5u]{entt::entity{12}, entt::entity{42}, entt::entity{7}, entt::entity{3}, entt::entity{9}};
     boxed_int values[5u]{{1}, {3}, {6}, {9}, {12}};
@@ -1288,7 +1773,7 @@ TEST(Storage, SortReverse) {
     ASSERT_TRUE(std::equal(std::begin(values), std::end(values), pool.begin(), pool.end()));
 }
 
-TEST(Storage, SortUnordered) {
+TEST_F(Storage, SortUnordered) {
     entt::storage<boxed_int> pool;
     entt::entity entities[5u]{entt::entity{12}, entt::entity{42}, entt::entity{7}, entt::entity{3}, entt::entity{9}};
     boxed_int values[5u]{{6}, {3}, {1}, {9}, {12}};
@@ -1313,7 +1798,7 @@ TEST(Storage, SortUnordered) {
     ASSERT_EQ(pool.data()[4u], entities[2u]);
 }
 
-TEST(Storage, SortRange) {
+TEST_F(Storage, SortRange) {
     entt::storage<boxed_int> pool;
     entt::entity entities[5u]{entt::entity{12}, entt::entity{42}, entt::entity{7}, entt::entity{3}, entt::entity{9}};
     boxed_int values[5u]{{3}, {6}, {1}, {9}, {12}};
@@ -1353,7 +1838,7 @@ TEST(Storage, SortRange) {
     ASSERT_EQ(pool.data()[4u], entities[2u]);
 }
 
-TEST(Storage, RespectDisjoint) {
+TEST_F(Storage, RespectDisjoint) {
     entt::storage<int> lhs;
     entt::storage<int> rhs;
 
@@ -1364,13 +1849,13 @@ TEST(Storage, RespectDisjoint) {
     ASSERT_TRUE(std::equal(std::rbegin(lhs_entities), std::rend(lhs_entities), lhs.entt::sparse_set::begin(), lhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(lhs_values), std::rend(lhs_values), lhs.begin(), lhs.end()));
 
-    lhs.respect(rhs);
+    lhs.sort_as(rhs);
 
     ASSERT_TRUE(std::equal(std::rbegin(lhs_entities), std::rend(lhs_entities), lhs.entt::sparse_set::begin(), lhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(lhs_values), std::rend(lhs_values), lhs.begin(), lhs.end()));
 }
 
-TEST(Storage, RespectOverlap) {
+TEST_F(Storage, RespectOverlap) {
     entt::storage<int> lhs;
     entt::storage<int> rhs;
 
@@ -1388,7 +1873,7 @@ TEST(Storage, RespectOverlap) {
     ASSERT_TRUE(std::equal(std::rbegin(rhs_entities), std::rend(rhs_entities), rhs.entt::sparse_set::begin(), rhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(rhs_values), std::rend(rhs_values), rhs.begin(), rhs.end()));
 
-    lhs.respect(rhs);
+    lhs.sort_as(rhs);
 
     auto begin = lhs.begin();
     auto end = lhs.end();
@@ -1403,7 +1888,7 @@ TEST(Storage, RespectOverlap) {
     ASSERT_EQ(lhs.data()[2u], lhs_entities[1u]);
 }
 
-TEST(Storage, RespectOrdered) {
+TEST_F(Storage, RespectOrdered) {
     entt::storage<int> lhs;
     entt::storage<int> rhs;
 
@@ -1421,13 +1906,13 @@ TEST(Storage, RespectOrdered) {
     ASSERT_TRUE(std::equal(std::rbegin(rhs_entities), std::rend(rhs_entities), rhs.entt::sparse_set::begin(), rhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(rhs_values), std::rend(rhs_values), rhs.begin(), rhs.end()));
 
-    rhs.respect(lhs);
+    rhs.sort_as(lhs);
 
     ASSERT_TRUE(std::equal(std::rbegin(rhs_entities), std::rend(rhs_entities), rhs.entt::sparse_set::begin(), rhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(rhs_values), std::rend(rhs_values), rhs.begin(), rhs.end()));
 }
 
-TEST(Storage, RespectReverse) {
+TEST_F(Storage, RespectReverse) {
     entt::storage<int> lhs;
     entt::storage<int> rhs;
 
@@ -1445,7 +1930,7 @@ TEST(Storage, RespectReverse) {
     ASSERT_TRUE(std::equal(std::rbegin(rhs_entities), std::rend(rhs_entities), rhs.entt::sparse_set::begin(), rhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(rhs_values), std::rend(rhs_values), rhs.begin(), rhs.end()));
 
-    rhs.respect(lhs);
+    rhs.sort_as(lhs);
 
     auto begin = rhs.begin();
     auto end = rhs.end();
@@ -1466,7 +1951,7 @@ TEST(Storage, RespectReverse) {
     ASSERT_EQ(rhs.data()[5u], rhs_entities[0u]);
 }
 
-TEST(Storage, RespectUnordered) {
+TEST_F(Storage, RespectUnordered) {
     entt::storage<int> lhs;
     entt::storage<int> rhs;
 
@@ -1484,7 +1969,7 @@ TEST(Storage, RespectUnordered) {
     ASSERT_TRUE(std::equal(std::rbegin(rhs_entities), std::rend(rhs_entities), rhs.entt::sparse_set::begin(), rhs.entt::sparse_set::end()));
     ASSERT_TRUE(std::equal(std::rbegin(rhs_values), std::rend(rhs_values), rhs.begin(), rhs.end()));
 
-    rhs.respect(lhs);
+    rhs.sort_as(lhs);
 
     auto begin = rhs.begin();
     auto end = rhs.end();
@@ -1505,23 +1990,24 @@ TEST(Storage, RespectUnordered) {
     ASSERT_EQ(rhs.data()[5u], rhs_entities[5u]);
 }
 
-TEST(Storage, CanModifyDuringIteration) {
+TEST_F(Storage, CanModifyDuringIteration) {
     entt::storage<int> pool;
     auto *ptr = &pool.emplace(entt::entity{0}, 42);
+    constexpr auto page_size = decltype(pool)::traits_type::page_size;
 
-    ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), page_size);
 
     const auto it = pool.cbegin();
-    pool.reserve(ENTT_PACKED_PAGE + 1u);
+    pool.reserve(page_size + 1u);
 
-    ASSERT_EQ(pool.capacity(), 2 * ENTT_PACKED_PAGE);
+    ASSERT_EQ(pool.capacity(), 2 * page_size);
     ASSERT_EQ(&pool.get(entt::entity{0}), ptr);
 
     // this should crash with asan enabled if we break the constraint
     [[maybe_unused]] const int &value = *it;
 }
 
-TEST(Storage, ReferencesGuaranteed) {
+TEST_F(Storage, ReferencesGuaranteed) {
     entt::storage<boxed_int> pool;
 
     pool.emplace(entt::entity{0}, 0);
@@ -1549,15 +2035,37 @@ TEST(Storage, ReferencesGuaranteed) {
     ASSERT_EQ(pool.get(entt::entity{1}).value, 3);
 }
 
-TEST(Storage, MoveOnlyComponent) {
+TEST_F(Storage, MoveOnlyComponent) {
     // the purpose is to ensure that move only components are always accepted
     [[maybe_unused]] entt::storage<std::unique_ptr<int>> pool;
 }
 
-TEST(Storage, UpdateFromDestructor) {
-    static constexpr auto size = 10u;
+TEST_F(Storage, PinnedComponent) {
+    // the purpose is to ensure that non-movable components are always accepted
+    [[maybe_unused]] entt::storage<pinned_type> pool;
+}
 
+ENTT_DEBUG_TEST_F(StorageDeathTest, PinnedComponent) {
+    entt::storage<pinned_type> pool;
+    const entt::entity entity{0};
+    const entt::entity destroy{1};
+    const entt::entity other{2};
+
+    pool.emplace(entity);
+    pool.emplace(destroy);
+    pool.emplace(other);
+
+    pool.erase(destroy);
+
+    ASSERT_DEATH(pool.swap_elements(entity, other), "");
+    ASSERT_DEATH(pool.compact(), "");
+    ASSERT_DEATH(pool.sort([](auto &&lhs, auto &&rhs) { return lhs < rhs; }), "");
+}
+
+TEST_F(Storage, UpdateFromDestructor) {
     auto test = [](const auto target) {
+        constexpr auto size = 10u;
+
         entt::storage<update_from_destructor> pool;
 
         for(std::size_t next{}; next < size; ++next) {
@@ -1580,12 +2088,12 @@ TEST(Storage, UpdateFromDestructor) {
         }
     };
 
-    test(entt::entity(size - 1u));
-    test(entt::entity(size - 2u));
+    test(entt::entity{9u});
+    test(entt::entity{8u});
     test(entt::entity{0u});
 }
 
-TEST(Storage, CreateFromConstructor) {
+TEST_F(Storage, CreateFromConstructor) {
     entt::storage<create_from_constructor> pool;
     const entt::entity entity{0u};
     const entt::entity other{1u};
@@ -1596,7 +2104,7 @@ TEST(Storage, CreateFromConstructor) {
     ASSERT_EQ(pool.get(other).child, static_cast<entt::entity>(entt::null));
 }
 
-TEST(Storage, CustomAllocator) {
+TEST_F(Storage, CustomAllocator) {
     auto test = [](auto pool, auto alloc) {
         pool.reserve(1u);
 
@@ -1638,17 +2146,19 @@ TEST(Storage, CustomAllocator) {
 
     test::throwing_allocator<entt::entity> allocator{};
 
-    test(entt::basic_storage<entt::entity, int, test::throwing_allocator<int>>{allocator}, allocator);
-    test(entt::basic_storage<entt::entity, std::true_type, test::throwing_allocator<std::true_type>>{allocator}, allocator);
-    test(entt::basic_storage<entt::entity, stable_type, test::throwing_allocator<stable_type>>{allocator}, allocator);
+    test(entt::basic_storage<int, entt::entity, test::throwing_allocator<int>>{allocator}, allocator);
+    test(entt::basic_storage<std::true_type, entt::entity, test::throwing_allocator<std::true_type>>{allocator}, allocator);
+    test(entt::basic_storage<stable_type, entt::entity, test::throwing_allocator<stable_type>>{allocator}, allocator);
 }
 
-TEST(Storage, ThrowingAllocator) {
+TEST_F(Storage, ThrowingAllocator) {
     auto test = [](auto pool) {
         using pool_allocator_type = typename decltype(pool)::allocator_type;
         using value_type = typename decltype(pool)::value_type;
 
         typename std::decay_t<decltype(pool)>::base_type &base = pool;
+        constexpr auto packed_page_size = decltype(pool)::traits_type::page_size;
+        constexpr auto sparse_page_size = std::remove_reference_t<decltype(base)>::traits_type::page_size;
 
         pool_allocator_type::trigger_on_allocate = true;
 
@@ -1657,8 +2167,8 @@ TEST(Storage, ThrowingAllocator) {
 
         pool_allocator_type::trigger_after_allocate = true;
 
-        ASSERT_THROW(pool.reserve(2 * ENTT_PACKED_PAGE), typename pool_allocator_type::exception_type);
-        ASSERT_EQ(pool.capacity(), ENTT_PACKED_PAGE);
+        ASSERT_THROW(pool.reserve(2 * packed_page_size), typename pool_allocator_type::exception_type);
+        ASSERT_EQ(pool.capacity(), packed_page_size);
 
         pool.shrink_to_fit();
 
@@ -1672,7 +2182,7 @@ TEST(Storage, ThrowingAllocator) {
 
         test::throwing_allocator<entt::entity>::trigger_on_allocate = true;
 
-        ASSERT_THROW(base.emplace(entt::entity{0}), test::throwing_allocator<entt::entity>::exception_type);
+        ASSERT_THROW(base.push(entt::entity{0}), test::throwing_allocator<entt::entity>::exception_type);
         ASSERT_FALSE(base.contains(entt::entity{0}));
         ASSERT_TRUE(base.empty());
 
@@ -1680,32 +2190,32 @@ TEST(Storage, ThrowingAllocator) {
 
         ASSERT_THROW(pool.emplace(entt::entity{0}, 0), typename pool_allocator_type::exception_type);
         ASSERT_FALSE(pool.contains(entt::entity{0}));
-        ASSERT_NO_THROW(pool.compact());
+        ASSERT_NO_FATAL_FAILURE(pool.compact());
         ASSERT_TRUE(pool.empty());
 
         pool.emplace(entt::entity{0}, 0);
-        const entt::entity entities[2u]{entt::entity{1}, entt::entity{ENTT_SPARSE_PAGE}};
+        const entt::entity entities[2u]{entt::entity{1}, entt::entity{sparse_page_size}};
         test::throwing_allocator<entt::entity>::trigger_after_allocate = true;
 
         ASSERT_THROW(pool.insert(std::begin(entities), std::end(entities), value_type{0}), test::throwing_allocator<entt::entity>::exception_type);
         ASSERT_TRUE(pool.contains(entt::entity{1}));
-        ASSERT_FALSE(pool.contains(entt::entity{ENTT_SPARSE_PAGE}));
+        ASSERT_FALSE(pool.contains(entt::entity{sparse_page_size}));
 
         pool.erase(entt::entity{1});
-        const value_type components[2u]{value_type{1}, value_type{ENTT_SPARSE_PAGE}};
+        const value_type components[2u]{value_type{1}, value_type{sparse_page_size}};
         test::throwing_allocator<entt::entity>::trigger_on_allocate = true;
         pool.compact();
 
         ASSERT_THROW(pool.insert(std::begin(entities), std::end(entities), std::begin(components)), test::throwing_allocator<entt::entity>::exception_type);
         ASSERT_TRUE(pool.contains(entt::entity{1}));
-        ASSERT_FALSE(pool.contains(entt::entity{ENTT_SPARSE_PAGE}));
+        ASSERT_FALSE(pool.contains(entt::entity{sparse_page_size}));
     };
 
-    test(entt::basic_storage<entt::entity, int, test::throwing_allocator<int>>{});
-    test(entt::basic_storage<entt::entity, stable_type, test::throwing_allocator<stable_type>>{});
+    test(entt::basic_storage<int, entt::entity, test::throwing_allocator<int>>{});
+    test(entt::basic_storage<stable_type, entt::entity, test::throwing_allocator<stable_type>>{});
 }
 
-TEST(Storage, ThrowingComponent) {
+TEST_F(Storage, ThrowingComponent) {
     entt::storage<test::throwing_type> pool;
     test::throwing_type::trigger_on_value = 42;
 
@@ -1759,9 +2269,9 @@ TEST(Storage, ThrowingComponent) {
 
 #if defined(ENTT_HAS_TRACKED_MEMORY_RESOURCE)
 
-TEST(Storage, NoUsesAllocatorConstruction) {
+TEST_F(Storage, NoUsesAllocatorConstruction) {
     test::tracked_memory_resource memory_resource{};
-    entt::basic_storage<entt::entity, int, std::pmr::polymorphic_allocator<int>> pool{&memory_resource};
+    entt::basic_storage<int, entt::entity, std::pmr::polymorphic_allocator<int>> pool{&memory_resource};
     const entt::entity entity{};
 
     pool.emplace(entity);
@@ -1774,11 +2284,11 @@ TEST(Storage, NoUsesAllocatorConstruction) {
     ASSERT_EQ(memory_resource.do_deallocate_counter(), 0u);
 }
 
-TEST(Storage, UsesAllocatorConstruction) {
+TEST_F(Storage, UsesAllocatorConstruction) {
     using string_type = typename test::tracked_memory_resource::string_type;
 
     test::tracked_memory_resource memory_resource{};
-    entt::basic_storage<entt::entity, string_type, std::pmr::polymorphic_allocator<string_type>> pool{&memory_resource};
+    entt::basic_storage<string_type, entt::entity, std::pmr::polymorphic_allocator<string_type>> pool{&memory_resource};
     const entt::entity entity{};
 
     pool.emplace(entity);
@@ -1792,3 +2302,17 @@ TEST(Storage, UsesAllocatorConstruction) {
 }
 
 #endif
+
+TEST_F(Storage, StorageType) {
+    // just a bunch of static asserts to avoid regressions
+    static_assert(std::is_same_v<entt::storage_type_t<char, entt::entity>, entt::sigh_mixin<entt::basic_storage<char, entt::entity>>>);
+    static_assert(std::is_same_v<entt::storage_type_t<int>, entt::sigh_mixin<entt::storage<int>>>);
+}
+
+TEST_F(Storage, StorageFor) {
+    // just a bunch of static asserts to avoid regressions
+    static_assert(std::is_same_v<entt::storage_for_t<const double, entt::entity>, const entt::sigh_mixin<entt::basic_storage<double, entt::entity>>>);
+    static_assert(std::is_same_v<entt::storage_for_t<char, entt::entity>, entt::sigh_mixin<entt::basic_storage<char, entt::entity>>>);
+    static_assert(std::is_same_v<entt::storage_for_t<const bool>, const entt::sigh_mixin<entt::storage<bool>>>);
+    static_assert(std::is_same_v<entt::storage_for_t<int>, entt::sigh_mixin<entt::storage<int>>>);
+}
