@@ -3,7 +3,7 @@ from conans import ConanFile
 
 class EnttConan(ConanFile):
     name = "entt"
-    version = "3.12.2"
+    version = "3.13.2"
     url = "https://github.com/Esri/entt/blob/runtimecore"
     license = "https://github.com/Esri/entt/blob/runtimecore/LICENSE"
     description = (
