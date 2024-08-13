@@ -1,6 +1,4 @@
-#
 # Tests configuration
-#
 
 include(FetchContent)
 include(CheckCXXSourceCompiles)
@@ -34,9 +32,16 @@ else()
     add_library(GTest::Main ALIAS gtest_main)
 
     target_compile_features(gtest PUBLIC cxx_std_17)
+    set_target_properties(gtest PROPERTIES CXX_CLANG_TIDY "")
+
     target_compile_features(gtest_main PUBLIC cxx_std_17)
+    set_target_properties(gtest_main PROPERTIES CXX_CLANG_TIDY "")
+
     target_compile_features(gmock PUBLIC cxx_std_17)
+    set_target_properties(gmock PROPERTIES CXX_CLANG_TIDY "")
+
     target_compile_features(gmock_main PUBLIC cxx_std_17)
+    set_target_properties(gmock_main PROPERTIES CXX_CLANG_TIDY "")
 endif()
 
 include_directories($<TARGET_PROPERTY:EnTT,INTERFACE_INCLUDE_DIRECTORIES>)
@@ -64,9 +69,19 @@ function(SETUP_TARGET TARGET_NAME)
                 >
                 # documentation diagnostic turned on for clang-cl only
                 $<$<STREQUAL:"${CMAKE_CXX_COMPILER_ID}","Clang">:-Wdocumentation>
+                # warnings from compilers that think I don't know what I'm doing
+                $<$<STREQUAL:"${CMAKE_CXX_COMPILER_ID}","Clang">:-Wcomma>
                 /EHsc /wd4324 /wd4996
-                $<$<CONFIG:Debug>:/Od>
+                # disabling INCREMENTAL is required by SizeBench
+                $<$<CONFIG:Debug>:/Od /INCREMENTAL:NO>
                 $<$<CONFIG:Release>:/O2>
+        )
+
+        target_link_options(
+            ${TARGET_NAME}
+            PRIVATE
+                # disabling INCREMENTAL is required by SizeBench
+                $<$<CONFIG:Debug>:/INCREMENTAL:NO>
         )
     else()
         target_compile_options(
@@ -105,6 +120,7 @@ function(SETUP_BASIC_TEST TEST_NAME TEST_SOURCES)
     target_link_libraries(${TEST_NAME} PRIVATE GTest::Main Threads::Threads)
     SETUP_TARGET(${TEST_NAME} ${ARGN})
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    set_tests_properties(${TEST_NAME} PROPERTIES TIMEOUT 60)
 endfunction()
 
 function(SETUP_LIB_SHARED_TEST TEST_NAME SUB_PATH)
@@ -112,6 +128,7 @@ function(SETUP_LIB_SHARED_TEST TEST_NAME SUB_PATH)
     add_library(_${TARGET_NAME} SHARED $<TARGET_OBJECTS:odr> lib/${TEST_NAME}/${SUB_PATH}/lib.cpp)
     SETUP_TARGET(_${TARGET_NAME} ENTT_API_EXPORT)
     SETUP_BASIC_TEST(lib_${TARGET_NAME} lib/${TEST_NAME}/${SUB_PATH}/main.cpp ENTT_API_IMPORT)
+    set_target_properties(lib_${TARGET_NAME} PROPERTIES CXX_CLANG_TIDY "")
     target_link_libraries(lib_${TARGET_NAME} PRIVATE _${TARGET_NAME})
 endfunction()
 
@@ -120,6 +137,8 @@ function(SETUP_LIB_PLUGIN_TEST TEST_NAME SUB_PATH)
     add_library(_${TARGET_NAME} MODULE $<TARGET_OBJECTS:odr> lib/${TEST_NAME}/${SUB_PATH}/plugin.cpp)
     SETUP_TARGET(_${TARGET_NAME} ${ARGVN})
     SETUP_BASIC_TEST(lib_${TARGET_NAME} lib/${TEST_NAME}/${SUB_PATH}/main.cpp PLUGIN="$<TARGET_FILE:_${TARGET_NAME}>" ${ARGVN})
+    set_target_properties(_${TARGET_NAME} PROPERTIES CXX_CLANG_TIDY "")
+    set_target_properties(lib_${TARGET_NAME} PROPERTIES CXX_CLANG_TIDY "")
     target_include_directories(_${TARGET_NAME} PRIVATE ${cr_INCLUDE_DIR})
     target_include_directories(lib_${TARGET_NAME} PRIVATE ${cr_INCLUDE_DIR})
     target_link_libraries(lib_${TARGET_NAME} PRIVATE ${CMAKE_DL_LIBS})
@@ -130,6 +149,7 @@ endfunction()
 
 if(ENTT_BUILD_BENCHMARK)
     SETUP_BASIC_TEST(benchmark benchmark/benchmark.cpp)
+    set_target_properties(benchmark PROPERTIES CXX_CLANG_TIDY "")
 endif()
 
 # Test example
@@ -137,6 +157,7 @@ endif()
 if(ENTT_BUILD_EXAMPLE)
     SETUP_BASIC_TEST(custom_identifier example/custom_identifier.cpp)
     SETUP_BASIC_TEST(entity_copy example/entity_copy.cpp)
+    SETUP_BASIC_TEST(reserved_bits example/reserved_bits.cpp)
     SETUP_BASIC_TEST(signal_less example/signal_less.cpp)
 endif()
 
@@ -180,7 +201,7 @@ if(ENTT_BUILD_SNAPSHOT)
     FetchContent_Declare(
         cereal
         GIT_REPOSITORY https://github.com/USCiLab/cereal.git
-        GIT_TAG v1.2.2
+        GIT_TAG v1.3.2
         GIT_SHALLOW 1
     )
 
@@ -192,6 +213,8 @@ if(ENTT_BUILD_SNAPSHOT)
     endif()
 
     SETUP_BASIC_TEST(cereal snapshot/snapshot.cpp)
+
+    set_target_properties(cereal PROPERTIES CXX_CLANG_TIDY "")
     target_include_directories(cereal PRIVATE ${cereal_INCLUDE_DIR})
 endif()
 
@@ -237,6 +260,8 @@ SETUP_BASIC_TEST(snapshot entt/entity/snapshot.cpp)
 SETUP_BASIC_TEST(sparse_set entt/entity/sparse_set.cpp)
 SETUP_BASIC_TEST(storage entt/entity/storage.cpp)
 SETUP_BASIC_TEST(storage_entity entt/entity/storage_entity.cpp)
+SETUP_BASIC_TEST(storage_no_instance entt/entity/storage_no_instance.cpp)
+SETUP_BASIC_TEST(storage_utility entt/entity/storage_utility.cpp)
 SETUP_BASIC_TEST(view entt/entity/view.cpp)
 
 # Test graph

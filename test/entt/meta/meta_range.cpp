@@ -1,7 +1,8 @@
-#include <type_traits>
+#include <utility>
 #include <gtest/gtest.h>
 #include <entt/core/hashed_string.hpp>
-#include <entt/locator/locator.hpp>
+#include <entt/core/iterator.hpp>
+#include <entt/core/type_info.hpp>
 #include <entt/meta/factory.hpp>
 #include <entt/meta/meta.hpp>
 #include <entt/meta/range.hpp>
@@ -11,7 +12,7 @@ struct MetaRange: ::testing::Test {
     void SetUp() override {
         using namespace entt::literals;
 
-        entt::meta<int>().type("int"_hs).data<42>("answer"_hs);
+        entt::meta<int>().type("int"_hs).data<42>("answer"_hs); // NOLINT
     }
 
     void TearDown() override {
@@ -30,9 +31,9 @@ TEST_F(MetaRange, Iterator) {
 
     using iterator = typename decltype(entt::resolve())::iterator;
 
-    static_assert(std::is_same_v<iterator::value_type, std::pair<entt::id_type, entt::meta_type>>);
-    static_assert(std::is_same_v<iterator::pointer, entt::input_iterator_pointer<std::pair<entt::id_type, entt::meta_type>>>);
-    static_assert(std::is_same_v<iterator::reference, std::pair<entt::id_type, entt::meta_type>>);
+    testing::StaticAssertTypeEq<iterator::value_type, std::pair<entt::id_type, entt::meta_type>>();
+    testing::StaticAssertTypeEq<iterator::pointer, entt::input_iterator_pointer<std::pair<entt::id_type, entt::meta_type>>>();
+    testing::StaticAssertTypeEq<iterator::reference, std::pair<entt::id_type, entt::meta_type>>();
 
     auto range = entt::resolve();
 
