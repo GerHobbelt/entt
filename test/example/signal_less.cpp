@@ -1,8 +1,11 @@
+#include <array>
 #include <iterator>
 #include <type_traits>
 #include <gtest/gtest.h>
 #include <entt/entity/entity.hpp>
+#include <entt/entity/mixin.hpp>
 #include <entt/entity/registry.hpp>
+#include <entt/entity/storage.hpp>
 
 template<typename Type, typename Entity>
 struct entt::storage_type<Type, Entity> {
@@ -27,17 +30,17 @@ inline constexpr auto has_on_construct_v = has_on_construct<Entity, Type>::value
 
 TEST(Example, SignalLess) {
     // invoking registry::on_construct<int> is a compile-time error
-    static_assert(!has_on_construct_v<entt::entity, int>);
-    static_assert(has_on_construct_v<entt::entity, char>);
+    ASSERT_FALSE((has_on_construct_v<entt::entity, int>));
+    ASSERT_TRUE((has_on_construct_v<entt::entity, char>));
 
     entt::registry registry;
-    const entt::entity entity[1u]{registry.create()};
+    const std::array entity{registry.create()};
 
     // literally a test for storage_adapter_mixin
     registry.emplace<int>(entity[0], 0);
     registry.erase<int>(entity[0]);
     registry.insert<int>(std::begin(entity), std::end(entity), 3);
-    registry.patch<int>(entity[0], [](auto &value) { value = 42; });
+    registry.patch<int>(entity[0], [](auto &value) { value = 2; });
 
-    ASSERT_EQ(registry.get<int>(entity[0]), 42);
+    ASSERT_EQ(registry.get<int>(entity[0]), 2);
 }

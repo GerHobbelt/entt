@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <entt/core/hashed_string.hpp>
 #include <entt/locator/locator.hpp>
+#include <entt/meta/context.hpp>
 #include <entt/meta/factory.hpp>
 #include <entt/meta/meta.hpp>
 #include <entt/meta/node.hpp>
@@ -20,7 +21,7 @@ struct clazz_t {
         ++counter;
     }
 
-    inline static int counter = 0;
+    inline static int counter = 0; // NOLINT
 };
 
 struct MetaDtor: ::testing::Test {

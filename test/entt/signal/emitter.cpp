@@ -1,7 +1,9 @@
 #include <functional>
+#include <memory>
 #include <utility>
 #include <gtest/gtest.h>
 #include <entt/signal/emitter.hpp>
+#include "../common/linter.hpp"
 
 struct test_emitter: entt::emitter<test_emitter> {
     using entt::emitter<test_emitter>::emitter;
@@ -15,19 +17,21 @@ struct bar_event {};
 struct quux_event {};
 
 TEST(Emitter, Move) {
-    test_emitter emitter;
+    test_emitter emitter{};
     emitter.on<foo_event>([](auto &, const auto &) {});
 
     ASSERT_FALSE(emitter.empty());
     ASSERT_TRUE(emitter.contains<foo_event>());
 
     test_emitter other{std::move(emitter)};
+    test::is_initialized(emitter);
 
     ASSERT_FALSE(other.empty());
     ASSERT_TRUE(other.contains<foo_event>());
     ASSERT_TRUE(emitter.empty());
 
     emitter = std::move(other);
+    test::is_initialized(other);
 
     ASSERT_FALSE(emitter.empty());
     ASSERT_TRUE(emitter.contains<foo_event>());
@@ -35,8 +39,8 @@ TEST(Emitter, Move) {
 }
 
 TEST(Emitter, Swap) {
-    test_emitter emitter;
-    test_emitter other;
+    test_emitter emitter{};
+    test_emitter other{};
     int value{};
 
     emitter.on<foo_event>([&value](auto &event, const auto &) {
@@ -47,19 +51,19 @@ TEST(Emitter, Swap) {
     ASSERT_TRUE(other.empty());
 
     emitter.swap(other);
-    emitter.publish(foo_event{42});
+    emitter.publish(foo_event{1});
 
     ASSERT_EQ(value, 0);
     ASSERT_TRUE(emitter.empty());
     ASSERT_FALSE(other.empty());
 
-    other.publish(foo_event{42});
+    other.publish(foo_event{1});
 
-    ASSERT_EQ(value, 42);
+    ASSERT_EQ(value, 1);
 }
 
 TEST(Emitter, Clear) {
-    test_emitter emitter;
+    test_emitter emitter{};
 
     ASSERT_TRUE(emitter.empty());
 
@@ -101,7 +105,7 @@ TEST(Emitter, Clear) {
 }
 
 TEST(Emitter, ClearFromCallback) {
-    test_emitter emitter;
+    test_emitter emitter{};
 
     ASSERT_TRUE(emitter.empty());
 
@@ -124,7 +128,7 @@ TEST(Emitter, ClearFromCallback) {
 }
 
 TEST(Emitter, On) {
-    test_emitter emitter;
+    test_emitter emitter{};
     int value{};
 
     emitter.on<foo_event>([&value](auto &event, const auto &) {
@@ -135,14 +139,14 @@ TEST(Emitter, On) {
     ASSERT_TRUE(emitter.contains<foo_event>());
     ASSERT_EQ(value, 0);
 
-    emitter.publish(foo_event{42});
+    emitter.publish(foo_event{1});
 
-    ASSERT_EQ(value, 42);
+    ASSERT_EQ(value, 1);
 }
 
 TEST(Emitter, OnAndErase) {
-    test_emitter emitter;
-    std::function<void(bar_event &, test_emitter &)> func{};
+    test_emitter emitter{};
+    const std::function<void(bar_event &, test_emitter &)> func{};
 
     emitter.on(func);
 
@@ -156,14 +160,15 @@ TEST(Emitter, OnAndErase) {
 }
 
 TEST(Emitter, CustomAllocator) {
-    std::allocator<void> allocator;
+    const std::allocator<void> allocator{};
     test_emitter emitter{allocator};
 
     ASSERT_EQ(emitter.get_allocator(), allocator);
     ASSERT_FALSE(emitter.get_allocator() != allocator);
 
     emitter.on<foo_event>([](auto &, const auto &) {});
-    decltype(emitter) other{std::move(emitter), allocator};
+    const decltype(emitter) other{std::move(emitter), allocator};
+    test::is_initialized(emitter);
 
     ASSERT_TRUE(emitter.empty());
     ASSERT_FALSE(other.empty());

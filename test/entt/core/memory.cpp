@@ -15,7 +15,7 @@
 #include "../common/tracked_memory_resource.hpp"
 
 TEST(ToAddress, Functionalities) {
-    std::shared_ptr<int> shared = std::make_shared<int>();
+    const std::shared_ptr<int> shared = std::make_shared<int>();
     auto *plain = std::addressof(*shared);
 
     ASSERT_EQ(entt::to_address(shared), plain);
@@ -28,7 +28,7 @@ TEST(PoccaPocmaAndPocs, Functionalities) {
 
     // code coverage purposes
     ASSERT_FALSE(lhs == rhs);
-    ASSERT_NO_FATAL_FAILURE(entt::propagate_on_container_swap(no_pocs, no_pocs));
+    ASSERT_NO_THROW(entt::propagate_on_container_swap(no_pocs, no_pocs));
 
     // honestly, I don't even know how one is supposed to test such a thing :)
     entt::propagate_on_container_copy_assignment(lhs, rhs);
@@ -85,16 +85,16 @@ TEST(FastMod, Functionalities) {
 
 TEST(AllocateUnique, Functionalities) {
     test::throwing_allocator<test::throwing_type> allocator{};
-    test::throwing_allocator<test::throwing_type>::trigger_on_allocate = true;
-    test::throwing_type::trigger_on_value = 0;
 
-    ASSERT_THROW((entt::allocate_unique<test::throwing_type>(allocator, 0)), test::throwing_allocator<test::throwing_type>::exception_type);
-    ASSERT_THROW((entt::allocate_unique<test::throwing_type>(allocator, test::throwing_type{0})), test::throwing_type::exception_type);
+    allocator.throw_counter<test::throwing_type>(0u);
 
-    std::unique_ptr<test::throwing_type, entt::allocation_deleter<test::throwing_allocator<test::throwing_type>>> ptr = entt::allocate_unique<test::throwing_type>(allocator, 42);
+    ASSERT_THROW((entt::allocate_unique<test::throwing_type>(allocator, false)), test::throwing_allocator_exception);
+    ASSERT_THROW((entt::allocate_unique<test::throwing_type>(allocator, test::throwing_type{true})), test::throwing_type_exception);
+
+    std::unique_ptr<test::throwing_type, entt::allocation_deleter<test::throwing_allocator<test::throwing_type>>> ptr = entt::allocate_unique<test::throwing_type>(allocator, false);
 
     ASSERT_TRUE(ptr);
-    ASSERT_EQ(*ptr, 42);
+    ASSERT_EQ(*ptr, false);
 
     ptr.reset();
 
@@ -108,7 +108,7 @@ TEST(AllocateUnique, NoUsesAllocatorConstruction) {
     std::pmr::polymorphic_allocator<int> allocator{&memory_resource};
 
     using type = std::unique_ptr<int, entt::allocation_deleter<std::pmr::polymorphic_allocator<int>>>;
-    type ptr = entt::allocate_unique<int>(allocator, 0);
+    [[maybe_unused]] const type ptr = entt::allocate_unique<int>(allocator, 0);
 
     ASSERT_EQ(memory_resource.do_allocate_counter(), 1u);
     ASSERT_EQ(memory_resource.do_deallocate_counter(), 0u);
@@ -121,7 +121,7 @@ TEST(AllocateUnique, UsesAllocatorConstruction) {
     std::pmr::polymorphic_allocator<string_type> allocator{&memory_resource};
 
     using type = std::unique_ptr<string_type, entt::allocation_deleter<std::pmr::polymorphic_allocator<string_type>>>;
-    type ptr = entt::allocate_unique<string_type>(allocator, test::tracked_memory_resource::default_value);
+    [[maybe_unused]] const type ptr = entt::allocate_unique<string_type>(allocator, test::tracked_memory_resource::default_value);
 
     ASSERT_GT(memory_resource.do_allocate_counter(), 1u);
     ASSERT_EQ(memory_resource.do_deallocate_counter(), 0u);
@@ -133,9 +133,8 @@ TEST(UsesAllocatorConstructionArgs, NoUsesAllocatorConstruction) {
     const auto value = 42;
     const auto args = entt::uses_allocator_construction_args<int>(std::allocator<int>{}, value);
 
-    static_assert(std::tuple_size_v<decltype(args)> == 1u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<const int &>>);
-
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 1u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<const int &>>();
     ASSERT_EQ(std::get<0>(args), value);
 }
 
@@ -143,9 +142,8 @@ TEST(UsesAllocatorConstructionArgs, LeadingAllocatorConvention) {
     const auto value = 42;
     const auto args = entt::uses_allocator_construction_args<std::tuple<int, char>>(std::allocator<int>{}, value, 'c');
 
-    static_assert(std::tuple_size_v<decltype(args)> == 4u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<std::allocator_arg_t, const std::allocator<int> &, const int &, char &&>>);
-
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 4u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<std::allocator_arg_t, const std::allocator<int> &, const int &, char &&>>();
     ASSERT_EQ(std::get<2>(args), value);
 }
 
@@ -153,9 +151,8 @@ TEST(UsesAllocatorConstructionArgs, TrailingAllocatorConvention) {
     const auto size = 42u;
     const auto args = entt::uses_allocator_construction_args<std::vector<int>>(std::allocator<int>{}, size);
 
-    static_assert(std::tuple_size_v<decltype(args)> == 2u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<const unsigned int &, const std::allocator<int> &>>);
-
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 2u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<const unsigned int &, const std::allocator<int> &>>();
     ASSERT_EQ(std::get<0>(args), size);
 }
 
@@ -164,26 +161,24 @@ TEST(UsesAllocatorConstructionArgs, PairPiecewiseConstruct) {
     const auto tup = std::make_tuple(size);
     const auto args = entt::uses_allocator_construction_args<std::pair<int, std::vector<int>>>(std::allocator<int>{}, std::piecewise_construct, std::make_tuple(3), tup);
 
-    static_assert(std::tuple_size_v<decltype(args)> == 3u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<int &&>, std::tuple<const unsigned int &, const std::allocator<int> &>>>);
-
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 3u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<int &&>, std::tuple<const unsigned int &, const std::allocator<int> &>>>();
     ASSERT_EQ(std::get<0>(std::get<2>(args)), size);
 }
 
 TEST(UsesAllocatorConstructionArgs, PairNoArgs) {
     [[maybe_unused]] const auto args = entt::uses_allocator_construction_args<std::pair<int, std::vector<int>>>(std::allocator<int>{});
 
-    static_assert(std::tuple_size_v<decltype(args)> == 3u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<>, std::tuple<const std::allocator<int> &>>>);
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 3u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<>, std::tuple<const std::allocator<int> &>>>();
 }
 
 TEST(UsesAllocatorConstructionArgs, PairValues) {
     const auto size = 42u;
     const auto args = entt::uses_allocator_construction_args<std::pair<int, std::vector<int>>>(std::allocator<int>{}, 3, size);
 
-    static_assert(std::tuple_size_v<decltype(args)> == 3u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<int &&>, std::tuple<const unsigned int &, const std::allocator<int> &>>>);
-
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 3u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<int &&>, std::tuple<const unsigned int &, const std::allocator<int> &>>>();
     ASSERT_EQ(std::get<0>(std::get<2>(args)), size);
 }
 
@@ -191,9 +186,8 @@ TEST(UsesAllocatorConstructionArgs, PairConstLValueReference) {
     const auto value = std::make_pair(3, 42u);
     const auto args = entt::uses_allocator_construction_args<std::pair<int, std::vector<int>>>(std::allocator<int>{}, value);
 
-    static_assert(std::tuple_size_v<decltype(args)> == 3u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<const int &>, std::tuple<const unsigned int &, const std::allocator<int> &>>>);
-
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 3u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<const int &>, std::tuple<const unsigned int &, const std::allocator<int> &>>>();
     ASSERT_EQ(std::get<0>(std::get<1>(args)), 3);
     ASSERT_EQ(std::get<0>(std::get<2>(args)), 42u);
 }
@@ -201,15 +195,17 @@ TEST(UsesAllocatorConstructionArgs, PairConstLValueReference) {
 TEST(UsesAllocatorConstructionArgs, PairRValueReference) {
     [[maybe_unused]] const auto args = entt::uses_allocator_construction_args<std::pair<int, std::vector<int>>>(std::allocator<int>{}, std::make_pair(3, 42u));
 
-    static_assert(std::tuple_size_v<decltype(args)> == 3u);
-    static_assert(std::is_same_v<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<int &&>, std::tuple<unsigned int &&, const std::allocator<int> &>>>);
+    ASSERT_EQ(std::tuple_size_v<decltype(args)>, 3u);
+    testing::StaticAssertTypeEq<decltype(args), const std::tuple<std::piecewise_construct_t, std::tuple<int &&>, std::tuple<unsigned int &&, const std::allocator<int> &>>>();
 }
 
 TEST(MakeObjUsingAllocator, Functionalities) {
     const auto size = 42u;
-    test::throwing_allocator<int>::trigger_on_allocate = true;
+    test::throwing_allocator<int> allocator{};
 
-    ASSERT_THROW((entt::make_obj_using_allocator<std::vector<int, test::throwing_allocator<int>>>(test::throwing_allocator<int>{}, size)), test::throwing_allocator<int>::exception_type);
+    allocator.throw_counter<int>(0u);
+
+    ASSERT_THROW((entt::make_obj_using_allocator<std::vector<int, test::throwing_allocator<int>>>(allocator, size)), test::throwing_allocator_exception);
 
     const auto vec = entt::make_obj_using_allocator<std::vector<int>>(std::allocator<int>{}, size);
 
@@ -218,24 +214,25 @@ TEST(MakeObjUsingAllocator, Functionalities) {
 }
 
 TEST(UninitializedConstructUsingAllocator, NoUsesAllocatorConstruction) {
-    alignas(int) std::byte storage[sizeof(int)];
-    std::allocator<int> allocator{};
+    alignas(int) std::byte storage[sizeof(int)]; // NOLINT
+    const std::allocator<int> allocator{};
 
-    int *value = entt::uninitialized_construct_using_allocator(reinterpret_cast<int *>(&storage), allocator, 42);
+    int *value = entt::uninitialized_construct_using_allocator(reinterpret_cast<int *>(&storage), allocator, 1); // NOLINT
 
-    ASSERT_EQ(*value, 42);
+    ASSERT_EQ(*value, 1);
 }
 
 #if defined(ENTT_HAS_TRACKED_MEMORY_RESOURCE)
+#    include <memory_resource>
 
 TEST(UninitializedConstructUsingAllocator, UsesAllocatorConstruction) {
     using string_type = typename test::tracked_memory_resource::string_type;
 
     test::tracked_memory_resource memory_resource{};
-    std::pmr::polymorphic_allocator<string_type> allocator{&memory_resource};
-    alignas(string_type) std::byte storage[sizeof(string_type)];
+    const std::pmr::polymorphic_allocator<string_type> allocator{&memory_resource};
+    alignas(string_type) std::byte storage[sizeof(string_type)]; // NOLINT
 
-    string_type *value = entt::uninitialized_construct_using_allocator(reinterpret_cast<string_type *>(&storage), allocator, test::tracked_memory_resource::default_value);
+    string_type *value = entt::uninitialized_construct_using_allocator(reinterpret_cast<string_type *>(&storage), allocator, test::tracked_memory_resource::default_value); // NOLINT
 
     ASSERT_GT(memory_resource.do_allocate_counter(), 0u);
     ASSERT_EQ(memory_resource.do_deallocate_counter(), 0u);
