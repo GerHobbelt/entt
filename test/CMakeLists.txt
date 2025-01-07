@@ -3,11 +3,6 @@
 include(FetchContent)
 include(CheckCXXSourceCompiles)
 
-check_cxx_source_compiles("
-    #include<version>
-    int main() { return 0; }
-" ENTT_HAS_HEADER_VERSION)
-
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
@@ -21,13 +16,8 @@ else()
         GIT_SHALLOW 1
     )
 
-    FetchContent_GetProperties(googletest)
-
-    if(NOT googletest_POPULATED)
-        FetchContent_Populate(googletest)
-        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-        add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
-    endif()
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
 
     add_library(GTest::Main ALIAS gtest_main)
 
@@ -56,21 +46,11 @@ function(SETUP_TARGET TARGET_NAME)
         target_compile_options(
             ${TARGET_NAME}
             PRIVATE
-                # vs2017 emits too many false positives for my tastes
-                $<IF:$<EQUAL:${MSVC_TOOLSET_VERSION},141>, /W1, /W4>
-                # clang-cl goes a little wrong with some warnings instead
                 $<$<STREQUAL:"${CMAKE_CXX_COMPILER_ID}","Clang">:
+                    -Wdocumentation
                     -Wno-deprecated-declarations
-                    -Wno-ignored-qualifiers
-                    -Wno-unknown-warning-option
                     -Wno-exceptions
-                    -Wno-unused-local-typedef
-                    -Wno-unused-private-field
                 >
-                # documentation diagnostic turned on for clang-cl only
-                $<$<STREQUAL:"${CMAKE_CXX_COMPILER_ID}","Clang">:-Wdocumentation>
-                # warnings from compilers that think I don't know what I'm doing
-                $<$<STREQUAL:"${CMAKE_CXX_COMPILER_ID}","Clang">:-Wcomma>
                 /EHsc /wd4324 /wd4996
                 # disabling INCREMENTAL is required by SizeBench
                 $<$<CONFIG:Debug>:/Od /INCREMENTAL:NO>
@@ -87,7 +67,11 @@ function(SETUP_TARGET TARGET_NAME)
         target_compile_options(
             ${TARGET_NAME}
             PRIVATE
-                -pedantic -fvisibility=hidden -Wall -Wshadow -Wno-deprecated-declarations
+                -fvisibility=hidden
+                -pedantic
+                -Wall
+                -Wno-deprecated-declarations
+                -Wshadow
                 $<$<CONFIG:Debug>:-O0 -g>
                 $<$<CONFIG:Release>:-O2>
         )
@@ -101,14 +85,6 @@ function(SETUP_TARGET TARGET_NAME)
             NOMINMAX
             ${ARGN}
     )
-
-    if(ENTT_HAS_HEADER_VERSION)
-        target_compile_definitions(
-            ${TARGET_NAME}
-            PRIVATE
-                ENTT_HAS_HEADER_VERSION
-        )
-    endif()
 endfunction()
 
 add_library(odr OBJECT odr.cpp)
@@ -226,11 +202,13 @@ SETUP_BASIC_TEST(version entt/config/version.cpp)
 
 SETUP_BASIC_TEST(dense_map entt/container/dense_map.cpp)
 SETUP_BASIC_TEST(dense_set entt/container/dense_set.cpp)
+SETUP_BASIC_TEST(table entt/container/table.cpp)
 
 # Test core
 
 SETUP_BASIC_TEST(algorithm entt/core/algorithm.cpp)
 SETUP_BASIC_TEST(any entt/core/any.cpp)
+SETUP_BASIC_TEST(bit entt/core/bit.cpp)
 SETUP_BASIC_TEST(compressed_pair entt/core/compressed_pair.cpp)
 SETUP_BASIC_TEST(enum entt/core/enum.cpp)
 SETUP_BASIC_TEST(family entt/core/family.cpp)
@@ -253,6 +231,7 @@ SETUP_BASIC_TEST(handle entt/entity/handle.cpp)
 SETUP_BASIC_TEST(helper entt/entity/helper.cpp)
 SETUP_BASIC_TEST(observer entt/entity/observer.cpp)
 SETUP_BASIC_TEST(organizer entt/entity/organizer.cpp)
+SETUP_BASIC_TEST(reactive_mixin entt/entity/reactive_mixin.cpp)
 SETUP_BASIC_TEST(registry entt/entity/registry.cpp)
 SETUP_BASIC_TEST(runtime_view entt/entity/runtime_view.cpp)
 SETUP_BASIC_TEST(sigh_mixin entt/entity/sigh_mixin.cpp)
@@ -262,6 +241,7 @@ SETUP_BASIC_TEST(storage entt/entity/storage.cpp)
 SETUP_BASIC_TEST(storage_entity entt/entity/storage_entity.cpp)
 SETUP_BASIC_TEST(storage_no_instance entt/entity/storage_no_instance.cpp)
 SETUP_BASIC_TEST(storage_utility entt/entity/storage_utility.cpp)
+SETUP_BASIC_TEST(storage_utility_no_mixin entt/entity/storage_utility.cpp ENTT_NO_MIXIN)
 SETUP_BASIC_TEST(view entt/entity/view.cpp)
 
 # Test graph
@@ -282,6 +262,7 @@ SETUP_BASIC_TEST(meta_container entt/meta/meta_container.cpp)
 SETUP_BASIC_TEST(meta_context entt/meta/meta_context.cpp)
 SETUP_BASIC_TEST(meta_conv entt/meta/meta_conv.cpp)
 SETUP_BASIC_TEST(meta_ctor entt/meta/meta_ctor.cpp)
+SETUP_BASIC_TEST(meta_custom entt/meta/meta_custom.cpp)
 SETUP_BASIC_TEST(meta_data entt/meta/meta_data.cpp)
 SETUP_BASIC_TEST(meta_dtor entt/meta/meta_dtor.cpp)
 SETUP_BASIC_TEST(meta_func entt/meta/meta_func.cpp)

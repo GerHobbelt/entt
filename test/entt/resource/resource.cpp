@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 #include <entt/core/type_info.hpp>
 #include <entt/resource/resource.hpp>
-#include "../common/linter.hpp"
+#include "../../common/linter.hpp"
 
 struct base {
     virtual ~base() = default;
@@ -56,6 +56,43 @@ TEST(Resource, Functionalities) {
     ASSERT_TRUE(copy);
     ASSERT_TRUE(move);
     ASSERT_EQ(copy, move);
+
+    copy.reset(std::make_shared<derived>());
+
+    ASSERT_TRUE(copy);
+    ASSERT_TRUE(move);
+    ASSERT_NE(copy, move);
+
+    move.reset();
+
+    ASSERT_TRUE(copy);
+    ASSERT_FALSE(move);
+    ASSERT_NE(copy, move);
+}
+
+TEST(Resource, Swap) {
+    entt::resource<int> resource{};
+    entt::resource<int> other{};
+
+    ASSERT_FALSE(resource);
+    ASSERT_FALSE(other);
+
+    resource.swap(other);
+
+    ASSERT_FALSE(resource);
+    ASSERT_FALSE(other);
+
+    resource.reset(std::make_shared<int>(1));
+
+    ASSERT_TRUE(resource);
+    ASSERT_EQ(*resource, 1);
+    ASSERT_FALSE(other);
+
+    resource.swap(other);
+
+    ASSERT_FALSE(resource);
+    ASSERT_TRUE(other);
+    ASSERT_EQ(*other, 1);
 }
 
 TEST(Resource, DerivedToBase) {
@@ -86,6 +123,7 @@ TEST(Resource, ConstNonConstAndAllInBetween) {
 
     entt::resource<const derived> copy{resource};
     entt::resource<const derived> move{std::move(other)};
+
     test::is_initialized(other);
 
     ASSERT_TRUE(resource);
