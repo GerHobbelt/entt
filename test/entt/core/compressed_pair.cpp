@@ -6,8 +6,8 @@
 #include <vector>
 #include <gtest/gtest.h>
 #include <entt/core/compressed_pair.hpp>
-#include "../common/empty.h"
-#include "../common/non_default_constructible.h"
+#include "../../common/empty.h"
+#include "../../common/non_default_constructible.h"
 
 TEST(CompressedPair, Size) {
     struct local {
@@ -47,14 +47,14 @@ TEST(CompressedPair, ConstructCopyMove) {
     entt::compressed_pair<test::empty, std::unique_ptr<int>> movable{test::empty{}, std::make_unique<int>(1)};
     auto by_move{std::move(movable)};
 
+    ASSERT_TRUE(by_move.second());
     ASSERT_EQ(*by_move.second(), 1);
-    ASSERT_EQ(movable.second(), nullptr); // NOLINT
 
     *by_move.second() = 3;
     movable = std::move(by_move);
 
+    ASSERT_TRUE(movable.second());
     ASSERT_EQ(*movable.second(), 3);
-    ASSERT_EQ(by_move.second(), nullptr); // NOLINT
 }
 
 TEST(CompressedPair, PiecewiseConstruct) {
@@ -130,6 +130,7 @@ TEST(CompressedPair, Get) {
     ASSERT_EQ(pair.first(), 3);
     ASSERT_EQ(pair.second(), 4);
 
+    // NOLINTNEXTLINE(readability-qualified-auto)
     auto &[cfirst, csecond] = std::as_const(pair);
 
     ASSERT_EQ(cfirst, 3);
